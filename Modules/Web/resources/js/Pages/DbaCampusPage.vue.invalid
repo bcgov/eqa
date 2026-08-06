@@ -1,0 +1,130 @@
+<script setup>
+import { ref, computed } from 'vue'
+import { Head, router, usePage } from '@inertiajs/vue3'
+
+const props = defineProps({
+    campuses: { type: Array, default: () => [] },
+    filters: { type: Object, default: () => ({}) },
+    errors: { type: Object, default: () => ({}) },
+})
+
+const page = usePage()
+
+const search = ref(props.filters?.search ?? '')
+const showModal = ref(false)
+const editingId = ref(null)
+
+const form = ref({
+    name: '',
+    code: '',
+    address: '',
+    is_active: true,
+})
+
+const flashMessage = computed(() => page.props.flash?.message ?? null)
+
+function resetForm() {
+    form.value = {
+        name: '',
+        code: '',
+        address: '',
+        is_active: true,
+    }
+    editingId.value = null
+}
+
+function openCreate() {
+    resetForm()
+    showModal.value = true
+}
+
+function openEdit(campus) {
+    editingId.value = campus.id
+    form.value = {
+        name: campus.name ?? '',
+        code: campus.code ?? '',
+        address: campus.address ?? '',
+        is_active: campus.is_active ?? true,
+    }
+    showModal.value = true
+}
+
+function closeModal() {
+    showModal.value = false
+    resetForm()
+}
+
+function submit() {
+    if (editingId.value) {
+        router.put(route('web.dba-campus.update', editingId.value), form.value, {
+            preserveScroll: true,
+            onSuccess: () => closeModal(),
+        })
+    } else {
+        router.post(route('web.dba-campus.store'), form.value, {
+            preserveScroll: true,
+            onSuccess: () => closeModal(),
+        })
+    }
+}
+
+function destroy(campus) {
+    if (!confirm(`Delete campus "${campus.name}"?`)) return
+    router.delete(route('web.dba-campus.destroy', campus.id), {
+        preserveScroll: true,
+    })
+}
+
+function runSearch() {
+    router.get(route('web.dba-campus.index'), { search: search.value }, {
+        preserveState: true,
+        replace: true,
+    })
+}
+</script>
+
+<template>
+    <Head title="Dba Campus" />
+
+    <div class="mx-auto max-w-6xl px-4 py-8">
+        <div class="mb-6 flex items-center justify-between">
+            <h1 class="text-2xl font-semibold text-gray-900">Dba Campus</h1>
+            <button
+                type="button"
+                class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500"
+                @click="openCreate"
+            >
+                New Campus
+            </button>
+        </div>
+
+        <div
+            v-if="flashMessage"
+            class="mb-4 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800"
+        >
+            {{ flashMessage }}
+        </div>
+
+        <div class="mb-4 flex gap-2">
+            <input
+                v-model="search"
+                type="text"
+                placeholder="Search campuses..."
+                class="w-full max-w-sm rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                @keyup.enter="runSearch"
+            />
+            <button
+                type="button"
+                class="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                @click="runSearch"
+            >
+                Search
+            </button>
+        </div>
+
+        <div class="overflow-hidden rounded-lg border border-gray-200 shadow-sm">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Name</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Code</th

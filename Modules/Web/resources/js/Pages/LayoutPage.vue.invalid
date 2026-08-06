@@ -1,0 +1,40 @@
+<script setup>
+import { Head } from '@inertiajs/vue3'
+import Alerts from '@/Components/Alerts.vue'
+
+defineOptions({ layout: null })
+
+defineProps({
+    title: {
+        type: String,
+        default: 'EQA'
+    }
+})
+</script>
+
+<template>
+    <Head :title="title" />
+    <div class="min-h-screen bg-gray-50 text-gray-900">
+        <header class="border-b border-gray-200 bg-white">
+            <nav class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
+                <div class="flex items-center gap-2">
+                    <span class="text-lg font-semibold text-gray-900">EQA</span>
+                </div>
+                <div class="flex items-center gap-4">
+                    <slot name="nav" />
+                </div>
+            </nav>
+        </header>
+
+        <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+            <Alerts />
+            <slot />
+        </main>
+
+        <footer class="border-t border-gray-200 bg-white">
+            <div class="mx-auto max-w-7xl px-4 py-4 text-center text-sm text-gray-500 sm:px-6 lg:px-8">
+                &copy; {{ new Date().getFullYear() }} EQA
+            </div>
+        </footer>
+    </div>
+</template>

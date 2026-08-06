@@ -1,0 +1,20 @@
+<script setup>
+import { Head } from '@inertiajs/vue3'
+import WebLayout from '../../Layouts/WebLayout.vue'
+
+defineOptions({ layout: WebLayout })
+</script>
+
+<template>
+    <Head title="Contact Us" />
+
+    <div class="mx-auto max-w-3xl px-4 py-12">
+        <h1 class="text-3xl font-bold text-gray-900">Contact Us</h1>
+
+        <div class="mt-6 space-y-4 text-gray-700">
+            <p>
+                We'd love to hear from you. Reach out to us using the information below.
+            </p>
+        </div>
+    </div>
+</template>

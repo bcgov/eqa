@@ -1,0 +1,23 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('application_logo_use', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('application_id')->constrained('application')->cascadeOnDelete();
+            $table->foreignId('logo_use_id')->constrained('logo_use')->cascadeOnDelete();
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('application_logo_use');
+    }
+};

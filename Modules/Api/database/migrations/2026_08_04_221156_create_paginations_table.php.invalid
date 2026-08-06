@@ -1,0 +1,18 @@
+<create>
+<parameter name="path">C:\Users\KMARSH\AppData\Local\Temp\ai-bridge-978c527402e7\CreatePaginationsTable.php</parameter>
+<parameter name="file_text"><?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('paginations', function (Blueprint $table) {
+            $table->id();
+            $table->integer('page_number')->n

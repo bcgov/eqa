@@ -1,0 +1,82 @@
+<script setup>
+import { Head, Link, useForm, router } from '@inertiajs/vue3'
+import { ref } from 'vue'
+
+const props = defineProps({
+    settings: {
+        type: Object,
+        default: () => ({}),
+    },
+    errors: {
+        type: Object,
+        default: () => ({}),
+    },
+})
+
+const form = useForm({
+    ...props.settings,
+})
+
+const successMessage = ref('')
+
+function submit() {
+    successMessage.value = ''
+    form.put(route('api.settings.update'), {
+        preserveScroll: true,
+        onSuccess: () => {
+            successMessage.value = 'Settings saved successfully.'
+        },
+    })
+}
+
+function reload() {
+    router.reload({ only: ['settings'] })
+}
+</script>
+
+<template>
+    <Head title="Settings" />
+
+    <div class="min-h-screen bg-gray-50 py-8 px-4">
+        <div class="mx-auto max-w-3xl">
+            <div class="mb-6 flex items-center justify-between">
+                <h1 class="text-2xl font-semibold text-gray-900">Settings</h1>
+                <Link
+                    href="/"
+                    class="text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                >
+                    Back to Dashboard
+                </Link>
+            </div>
+
+            <div
+                v-if="successMessage"
+                class="mb-4 rounded-md bg-green-50 p-4 text-sm text-green-700 ring-1 ring-green-200"
+            >
+                {{ successMessage }}
+            </div>
+
+            <div class="rounded-lg bg-white shadow ring-1 ring-gray-200">
+                <form @submit.prevent="submit" class="space-y-6 p-6">
+                    <div
+                        v-for="(value, key) in form.data()"
+                        :key="key"
+                        class="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:items-center"
+                    >
+                        <label
+                            :for="key"
+                            class="text-sm font-medium capitalize text-gray-700"
+                        >
+                            {{ key.replace(/_/g, ' ') }}
+                        </label>
+                        <div class="sm:col-span-2">
+                            <input
+                                :id="key"
+                                v-model="form[key]"
+                                type="text"
+                                class="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm"
+                            />
+                            <p
+                                v-if="form.errors[key]"
+                                class="mt-1 text-sm text-red-600"
+                            >

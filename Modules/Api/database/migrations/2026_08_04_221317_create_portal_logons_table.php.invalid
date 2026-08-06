@@ -1,0 +1,32 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('portal_logons', function (Blueprint $table) {
+            $table->id('portal_logon_id');
+            $table->unsignedBigInteger('user_id')->nullable()->index();
+            $table->unsignedBigInteger('company_id')->nullable()->index();
+            $table->unsignedBigInteger('role_id')->nullable()->index();
+
+            $table->string('username')->unique();
+            $table->string('password');
+            $table->string('email')->nullable()->index();
+            $table->string('first_name')->nullable();
+            $table->string('last_name')->nullable();
+
+            $table->string('security_question')->nullable();
+            $table->string('security_answer')->nullable();
+
+            $table->string('token')->nullable()->index();
+            $table->timestamp('token_expiration')->nullable();
+            $table->string('reset_password_token')->nullable()->index();
+            $table->timestamp('reset_password_expiration')->nullable();

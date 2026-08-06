@@ -1,0 +1,32 @@
+<script setup>
+import { Head, Link } from '@inertiajs/vue3'
+
+defineProps({
+    status: {
+        type: [Number, String],
+        default: null,
+    },
+    message: {
+        type: String,
+        default: 'An unexpected error occurred while processing your request.',
+    },
+})
+</script>
+
+<template>
+    <Head title="Exception" />
+
+    <div class="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12">
+        <div class="w-full max-w-lg rounded-lg bg-white p-8 text-center shadow-md">
+            <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-100">
+                <svg
+                    class="h-8 w-8 text-red-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77

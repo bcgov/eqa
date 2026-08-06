@@ -1,0 +1,57 @@
+<script setup>
+import { Head, Link, router } from '@inertiajs/vue3'
+import { ref } from 'vue'
+
+const props = defineProps({
+    records: {
+        type: Array,
+        default: () => [],
+    },
+})
+
+const search = ref('')
+
+function refresh() {
+    router.get(route('web.dba.index'), { search: search.value }, { preserveState: true, replace: true })
+}
+</script>
+
+<template>
+    <Head title="DBA" />
+
+    <div class="mx-auto max-w-6xl p-6">
+        <div class="mb-6 flex items-center justify-between">
+            <h1 class="text-2xl font-semibold text-gray-900">DBA</h1>
+            <Link
+                :href="route('web.dba.create')"
+                class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+            >
+                New Record
+            </Link>
+        </div>
+
+        <div class="mb-4 flex gap-2">
+            <input
+                v-model="search"
+                type="text"
+                placeholder="Search..."
+                class="w-full max-w-sm rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                @keyup.enter="refresh"
+            />
+            <button
+                type="button"
+                class="rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
+                @click="refresh"
+            >
+                Search
+            </button>
+        </div>
+
+        <div class="overflow-hidden rounded-lg border border-gray-200 shadow-sm">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                            ID
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs

@@ -1,0 +1,124 @@
+<script setup>
+import { Head, Link } from '@inertiajs/vue3'
+import { computed } from 'vue'
+
+const props = defineProps({
+    application: {
+        type: Object,
+        required: true,
+    },
+})
+
+const statusClasses = computed(() => {
+    const status = (props.application?.status || '').toLowerCase()
+    switch (status) {
+        case 'approved':
+            return 'bg-green-100 text-green-800 ring-green-600/20'
+        case 'rejected':
+        case 'denied':
+            return 'bg-red-100 text-red-800 ring-red-600/20'
+        case 'pending':
+        case 'in review':
+            return 'bg-yellow-100 text-yellow-800 ring-yellow-600/20'
+        default:
+            return 'bg-gray-100 text-gray-800 ring-gray-500/20'
+    }
+})
+
+function formatDate(value) {
+    if (!value) {
+        return '—'
+    }
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) {
+        return value
+    }
+    return date.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+    })
+}
+
+function fieldValue(value) {
+    return value === null || value === undefined || value === '' ? '—' : value
+}
+</script>
+
+<template>
+    <Head title="View Application" />
+
+    <div class="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+        <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+                <nav class="mb-2 text-sm text-gray-500" aria-label="Breadcrumb">
+                    <ol class="flex items-center gap-1">
+                        <li>
+                            <Link href="/applications" class="hover:text-gray-700">Applications</Link>
+                        </li>
+                        <li aria-hidden="true">/</li>
+                        <li class="font-medium text-gray-700">View Application</li>
+                    </ol>
+                </nav>
+                <h1 class="text-2xl font-semibold text-gray-900">View Application</h1>
+                <p class="mt-1 text-sm text-gray-500">
+                    Application #{{ fieldValue(application.id ?? application.applicationNumber) }}
+                </p>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <span
+                    class="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset"
+                    :class="statusClasses"
+                >
+                    {{ fieldValue(application.status) }}
+                </span>
+                <Link
+                    href="/applications"
+                    class="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                >
+                    Back to List
+                </Link>
+            </div>
+        </div>
+
+        <div class="overflow-hidden rounded-lg bg-white shadow ring-1 ring-black/5">
+            <div class="border-b border-gray-200 px-6 py-4">
+                <h2 class="text-base font-semibold text-gray-900">Applicant Details</h2>
+            </div>
+
+            <dl class="grid grid-cols-1 gap-x-6 gap-y-6 px-6 py-6 sm:grid-cols-2">
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">Applicant Name</dt>
+                    <dd class="mt-1 text-sm text-gray-900">{{ fieldValue(application.applicantName) }}</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">Email</dt>
+                    <dd class="mt-1 text-sm text-gray-900">{{ fieldValue(application.email) }}</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">Phone</dt>
+                    <dd class="mt-1 text-sm text-gray-900">{{ fieldValue(application.phone) }}</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">Program</dt>
+                    <dd class="mt-1 text-sm text-gray-900">{{ fieldValue(application.program) }}</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">Submitted On</dt>
+                    <dd class="mt-1 text-sm text-gray-900">{{ formatDate(application.submittedAt) }}</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">Last Updated</dt>
+                    <dd class="mt-1 text-sm text-gray-900">{{ formatDate(application.updatedAt) }}</dd>
+                </div>
+                <div class="sm:col-span-2">
+                    <dt class="text-sm font-medium text-gray-500">Notes</dt>
+                    <dd class="mt-1 whitespace-pre-line text-sm text-gray-900">{{ fieldValue(application.notes) }}</dd>
+                </div>
+            </dl>
+        </div>
+
+        <div
+            v-if="application.attachments && application.attachments.length"
+            class="mt-6 overflow-hidden rounded-l

@@ -1,0 +1,9 @@
+@import 'tailwindcss';
+
+/* Mirror the tool's own working Tailwind v4 setup: simple, separate @source
+   lines that scan all of resources and every generated module. These are
+   explicit because the destination app lives under a path Tailwind would
+   otherwise treat as non-source. */
+@source '../**/*.vue';
+@source '../**/*.js';
+@source '../../Modules/**/*.vue';
