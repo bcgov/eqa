@@ -1,4 +1,4 @@
-name: Test Laravel NRSTS in DEV
+name: Test Laravel EQA in DEV
 
 on:
   push:
