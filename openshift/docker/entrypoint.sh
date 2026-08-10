@@ -2,6 +2,7 @@
 set -e
 
 echo "Start entrypoint file"
+echo "Current user: $(whoami)"
 
 echo "APACHE_REMOTE_IP_HEADER: ${APACHE_REMOTE_IP_HEADER}"
 echo "APACHE_REMOTE_IP_TRUSTED_PROXY: ${APACHE_REMOTE_IP_TRUSTED_PROXY}"
