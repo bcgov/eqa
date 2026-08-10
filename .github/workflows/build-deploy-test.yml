@@ -1,4 +1,4 @@
-name: Build and Deploy NRSTS in TEST
+name: Build and Deploy EQA in TEST
 
 on:
   pull_request:
@@ -19,7 +19,7 @@ jobs:
         echo OC CLI Version: $(oc version)
 
 
-  # Build NRSTS
+  # Build EQA
   build:
     name: Build project
     runs-on: ubuntu-latest
@@ -28,10 +28,10 @@ jobs:
       cancel-in-progress: true
     env:
       BUILD_ID: ${{ github.event.number }}
-      NAMESPACE: fe1642-test
-      BUILD_NAMESPACE: fe1642-tools
+      NAMESPACE: f40a2a-test
+      BUILD_NAMESPACE: f40a2a-tools
       BUILD_REF: ${{ github.base_ref }}
-      HOST_PREFIX: nrsts
+      HOST_PREFIX: eqa
       SOURCE_REPOSITORY_BRANCH: test
     steps:
       # Checkout the PR branch
@@ -60,7 +60,7 @@ jobs:
           make oc-build-web
       - name: Finished OC Build from yaml
         run: |
-          echo "FINISHED OC BUILD NRSTS"
+          echo "FINISHED OC BUILD EQA"
           echo ++++++++++
 
   # Deploy project
@@ -72,10 +72,10 @@ jobs:
       - build
     env:
       BUILD_ID: ${{ github.event.number }}
-      NAMESPACE: fe1642-test
-      BUILD_NAMESPACE: fe1642-tools
+      NAMESPACE: f40a2a-test
+      BUILD_NAMESPACE: f40a2a-tools
       BUILD_REF: ${{ github.base_ref }}
-      HOST_PREFIX: nrsts
+      HOST_PREFIX: eqa
       SOURCE_REPOSITORY_BRANCH: test
     steps:
       - name: Print env
@@ -101,12 +101,12 @@ jobs:
       - name: Log in to OpenShift
         run: |
           oc login --token=${{ secrets.SA_TOKEN }} --server=https://api.gold.devops.gov.bc.ca:6443
-      # Deploy the NRSTS.
-      - name: Deploy NRSTS Test
+      # Deploy the EQA.
+      - name: Deploy EQA Test
         working-directory: "./openshift"
         run: |
           make oc-deploy-web
       - name: Finished OC Deploy from yaml
         run: |
-          echo "FINISHED OC Deploy TEST NRSTS"
+          echo "FINISHED OC Deploy TEST EQA"
           echo ++++++++++
