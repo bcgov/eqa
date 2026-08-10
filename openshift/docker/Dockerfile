@@ -19,8 +19,8 @@ ENV TZ=${TZ}
 ENV APACHE_SERVER_NAME=__default__
 
 WORKDIR /
-COPY ../apache-oc/image-files/ /
-COPY ../apache-oc/image-files/etc/apache2/sites-available/000-default.conf /etc/apache2/sites-enabled/000-default.conf
+COPY openshift/apache-oc/image-files/ /
+COPY openshift/apache-oc/image-files/etc/apache2/sites-available/000-default.conf /etc/apache2/sites-enabled/000-default.conf
 COPY entrypoint.sh /sbin/entrypoint.sh
 COPY / /var/www/html/
 
