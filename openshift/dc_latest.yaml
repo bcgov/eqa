@@ -32,7 +32,8 @@ objects:
       replicas: ${{MIN_REPLICAS}}
       revisionHistoryLimit: 5
       selector:
-        deployment: ${NAME}
+        matchLabels:
+          deployment: ${NAME}
       strategy:
         type: RollingUpdate
       template:
@@ -109,7 +110,7 @@ objects:
       name: ${JOB_NAME}
       namespace: ${NAMESPACE}
       labels:
-        template: 'nrsts-daily-cronjob'
+        template: 'eqa-daily-cronjob'
         cronjob: ${JOB_NAME}
         app.kubernetes.io/part-of: ${LABEL_NAME}
     spec:
@@ -120,7 +121,7 @@ objects:
       jobTemplate:
         metadata:
           labels:
-            template: 'nrsts-daily-cronjob'
+            template: 'eqa-daily-cronjob'
             cronjob: ${JOB_NAME}
         spec:
           backoffLimit: ${{JOB_BACKOFF_LIMIT}}
@@ -280,7 +281,7 @@ parameters:
   - name: 'JOB_NAME'
     displayName: 'Job Name'
     description: 'Name of the Scheduled Job to Create.'
-    value: 'nrsts-daily-cronjob'
+    value: 'eqa-daily-cronjob'
     required: true
   - name: 'SCHEDULE'
     displayName: 'Cron Schedule'
