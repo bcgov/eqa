@@ -21,7 +21,7 @@ ENV APACHE_SERVER_NAME=__default__
 WORKDIR /
 COPY openshift/apache-oc/image-files/ /
 COPY openshift/apache-oc/image-files/etc/apache2/sites-available/000-default.conf /etc/apache2/sites-enabled/000-default.conf
-COPY entrypoint.sh /sbin/entrypoint.sh
+COPY openshift/docker/entrypoint.sh /sbin/entrypoint.sh
 COPY / /var/www/html/
 
 EXPOSE 8080 8443 2525
