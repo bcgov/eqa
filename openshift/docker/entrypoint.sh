@@ -31,6 +31,9 @@ chmod -R a+w node_modules
 echo "Starting apache in the background:"
 /usr/sbin/apache2ctl start
 
+echo "Run migrations"
+php artisan migrate --force
+
 echo "Clear cache"
 php artisan cache:clear
 
