@@ -32,7 +32,7 @@ objects:
         type: Git
       strategy:
         dockerStrategy:
-          dockerfilePath: ./Dockerfile
+          dockerfilePath: ./openshift/docker/Dockerfile
           env:
             - name: USER_ID
               value: ${OC_USER_ID}
