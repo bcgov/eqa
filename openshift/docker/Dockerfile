@@ -131,8 +131,6 @@ WORKDIR /var/www/html/
 RUN mkdir -p storage && mkdir -p bootstrap/cache && chmod -R ug+rwx storage bootstrap/cache \
     && cd /var/www && chown -R ${USER_ID}:root html && chmod -R ug+rw html \
     && chmod 764 /var/www/html/artisan \
-#Error: EACCES: permission denied, open '/var/www/html/public/mix-manifest.json' \
-    && cd /var/www/html/public && chmod 766 mix-manifest.json \
     && mkdir /.npm && mkdir /.npm/_cache && chown -R ${USER_ID}:0 "/.npm" \
 #Writing to directory /.config/psysh is not allowed.
     && mkdir -p /.config/psysh && chown -R ${USER_ID}:root /.config && chmod -R 755 /.config \
