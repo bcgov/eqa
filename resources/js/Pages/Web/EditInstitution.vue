@@ -5,6 +5,9 @@ const props = defineProps({
     institution: { type: Object, default: null },
     qaOptions: { type: Array, default: () => [] },
     enrolmentTypes: { type: Array, default: () => [] },
+    canEditDli: { type: Boolean, default: false },
+    submitUrl: { type: String, default: '/web/institution' },
+    cancelUrl: { type: String, default: '/web/institution' },
 })
 
 const inputClass = 'mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none'
@@ -13,6 +16,7 @@ const form = useForm({
     name: props.institution?.name ?? '',
     legal_name: props.institution?.legal_name ?? '',
     bc_incorporation_number: props.institution?.bc_incorporation_number ?? '',
+    dli_number: props.institution?.dli_number ?? '',
     qa_met_through: props.institution?.qa_met_through ?? '',
     website: props.institution?.website ?? '',
     street1: props.institution?.street1 ?? '',
@@ -30,7 +34,7 @@ const form = useForm({
 })
 
 function submit() {
-    form.put('/web/institution')
+    form.put(props.submitUrl)
 }
 </script>
 
@@ -38,7 +42,7 @@ function submit() {
     <Head title="Edit Institution" />
 
     <div class="mb-4">
-        <Link href="/web/institution" class="text-sm text-indigo-600 hover:underline">← Institution</Link>
+        <Link :href="cancelUrl" class="text-sm text-indigo-600 hover:underline">← Back</Link>
     </div>
 
     <h1 class="text-2xl font-bold text-slate-800">Edit Institution Details</h1>
@@ -57,6 +61,10 @@ function submit() {
                 </label>
                 <label class="block"><span class="text-sm text-slate-600">BC Incorporation Number</span>
                     <input v-model="form.bc_incorporation_number" type="text" :class="inputClass" />
+                </label>
+                <label v-if="canEditDli" class="block"><span class="text-sm text-slate-600">DLI Number</span>
+                    <input v-model="form.dli_number" type="text" :class="inputClass" placeholder="e.g. O19023456789" />
+                    <span class="mt-1 block text-xs text-slate-400">Designated Learning Institution number (managed by the Ministry).</span>
                 </label>
                 <label class="block"><span class="text-sm text-slate-600">Quality Assurance Met Through</span>
                     <select v-model="form.qa_met_through" :class="inputClass">
@@ -122,7 +130,7 @@ function submit() {
 
         <div class="flex gap-2">
             <button type="submit" :disabled="form.processing" class="rounded-md bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">Save Changes</button>
-            <Link href="/web/institution" class="rounded-md border border-slate-300 px-5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</Link>
+            <Link :href="cancelUrl" class="rounded-md border border-slate-300 px-5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</Link>
         </div>
     </form>
 </template>

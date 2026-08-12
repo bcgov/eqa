@@ -36,6 +36,9 @@ class InstitutionController extends Controller
 
         return Inertia::render('Admin/InstitutionView', [
             'institution' => $institution,
+            'applications' => Schema::hasTable('applications')
+                ? DB::table('applications')->where('institution_crm_id', $crmId)->orderByDesc('application_date')->get()
+                : collect(),
             'campuses' => Schema::hasTable('campuses')
                 ? DB::table('campuses')->where('institution_crm_id', $crmId)->orderByDesc('primary_location')->orderBy('name')->get()
                 : collect(),
@@ -46,6 +49,60 @@ class InstitutionController extends Controller
                 ? DB::table('dbas')->where('institution_crm_id', $crmId)->orderBy('name')->get()
                 : collect(),
         ]);
+    }
+
+    // --- Institution details --------------------------------------------
+
+    public function edit(string $crmId): Response
+    {
+        $institution = $this->institution($crmId);
+        abort_if($institution === null, 404);
+
+        return Inertia::render('Web/EditInstitution', [
+            'institution' => $institution,
+            'qaOptions' => [
+                'Private Training Institutions Branch (PTIB) Designation',
+                'Public Institution Legislation',
+                'Ministry Review Process',
+                'Ministers consent under the Degree Authorization Act (DAA)',
+                'Languages Canada Accreditation',
+            ],
+            'enrolmentTypes' => ['FTE', 'Enrolment'],
+            'canEditDli' => true,
+            'submitUrl' => "/admin/institutions/{$crmId}",
+            'cancelUrl' => "/admin/institutions/{$crmId}",
+        ]);
+    }
+
+    public function update(Request $request, string $crmId): RedirectResponse
+    {
+        $institution = $this->institution($crmId);
+        abort_if($institution === null, 404);
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'legal_name' => ['nullable', 'string', 'max:255'],
+            'bc_incorporation_number' => ['nullable', 'string', 'max:100'],
+            'dli_number' => ['nullable', 'string', 'max:100'],
+            'qa_met_through' => ['nullable', 'string', 'max:255'],
+            'website' => ['nullable', 'string', 'max:255'],
+            'street1' => ['nullable', 'string', 'max:255'],
+            'street2' => ['nullable', 'string', 'max:255'],
+            'city' => ['nullable', 'string', 'max:255'],
+            'province' => ['nullable', 'string', 'max:100'],
+            'postal_code' => ['nullable', 'string', 'max:20'],
+            'country' => ['nullable', 'string', 'max:100'],
+            'total_enrolment' => ['nullable', 'integer', 'min:0'],
+            'intl_students_permit' => ['nullable', 'integer', 'min:0'],
+            'intl_students_other' => ['nullable', 'integer', 'min:0'],
+            'in_person_students' => ['nullable', 'integer', 'min:0'],
+            'online_students' => ['nullable', 'integer', 'min:0'],
+            'enrolment_type' => ['nullable', 'string', 'max:50'],
+        ]);
+
+        DB::table('institutions')->where('crm_id', $crmId)->update($data);
+
+        return redirect("/admin/institutions/{$crmId}")->with('success', 'Institution details updated.');
     }
 
     // --- Locations (campuses) ------------------------------------------

@@ -48,6 +48,7 @@ const flash = computed(() => usePage().props.flash || {})
                 <h2 class="mb-3 text-sm font-semibold text-slate-700">Institution Details</h2>
                 <dl class="divide-y divide-slate-100 text-sm">
                     <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Legal Name</dt><dd class="text-right text-slate-800">{{ institution.legal_name || '—' }}</dd></div>
+                    <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">DLI Number</dt><dd class="text-right text-slate-800">{{ institution.dli_number || '—' }}</dd></div>
                     <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">QA Met Through</dt><dd class="text-right text-slate-800">{{ institution.qa_met_through || '—' }}</dd></div>
                     <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Business Owner</dt><dd class="text-right text-slate-800">{{ institution.business_owner || '—' }}</dd></div>
                     <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Primary Contact</dt><dd class="text-right text-slate-800">{{ institution.primary_contact || '—' }}</dd></div>

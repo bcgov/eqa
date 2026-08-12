@@ -23,6 +23,7 @@ return new class extends Migration
             $table->string('eqa_standing')->nullable();
             $table->string('ptib_standing')->nullable();
             $table->string('qa_met_through')->nullable();
+            $table->string('dli_number')->nullable();
             $table->date('designation_start')->nullable();
             $table->date('designation_expiry')->nullable();
             $table->date('ptib_cert_expiry')->nullable();
