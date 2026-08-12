@@ -42,6 +42,18 @@ class WebPortalController extends Controller
             ->get();
     }
 
+    /** Workflow stages that mean the institution already has a submitted / in-review application. */
+    private const ACTIVE_STAGES = ['pending_review', 'fees_payment', 'under_review', 'suitability_review'];
+
+    private function hasActiveApplication(object $institution): bool
+    {
+        return DB::getSchemaBuilder()->hasTable('applications')
+            && DB::table('applications')
+                ->where('institution_crm_id', $institution->crm_id)
+                ->whereIn('workflow_stage', self::ACTIVE_STAGES)
+                ->exists();
+    }
+
     private function campusesFor(?object $institution)
     {
         if ($institution === null || ! DB::getSchemaBuilder()->hasTable('campuses')) {
@@ -524,10 +536,15 @@ class WebPortalController extends Controller
         return redirect('/web/users')->with('success', 'User removed.');
     }
 
-    public function create(Request $request): Response
+    public function create(Request $request): Response|RedirectResponse
     {
         $institution = $this->institution($request);
         abort_if($institution === null, 403);
+
+        if ($this->hasActiveApplication($institution)) {
+            return redirect('/web/applications')
+                ->with('error', 'You already have an application that is submitted or under review. You cannot start a new one until it is finalized.');
+        }
 
         return Inertia::render('Web/NewApplication', ['institution' => $institution]);
     }
@@ -536,6 +553,11 @@ class WebPortalController extends Controller
     {
         $institution = $this->institution($request);
         abort_if($institution === null, 403);
+
+        if ($this->hasActiveApplication($institution)) {
+            return redirect('/web/applications')
+                ->with('error', 'You already have an application that is submitted or under review. You cannot submit a new one until it is finalized.');
+        }
 
         $data = $request->validate([
             'total_enrolment' => ['nullable', 'integer', 'min:0'],

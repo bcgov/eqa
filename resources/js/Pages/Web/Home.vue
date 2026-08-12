@@ -1,10 +1,16 @@
 <script setup>
 import { Head, Link } from '@inertiajs/vue3'
+import { computed } from 'vue'
 
-defineProps({
+const props = defineProps({
     institution: { type: Object, default: null },
     applications: { type: Array, default: () => [] },
 })
+
+const activeStatuses = ['Pending Review', 'Under Review', 'Suitability Review']
+const hasActiveApplication = computed(() =>
+    (props.applications || []).some((a) => activeStatuses.includes(a.status))
+)
 
 function statusClass(s) {
     if (s === 'Approved') return 'bg-green-100 text-green-700'
@@ -23,7 +29,8 @@ function statusClass(s) {
             <h1 class="text-2xl font-bold text-slate-800">EQA Designation Application Portal</h1>
             <p v-if="institution" class="mt-1 text-sm text-slate-500">Welcome, {{ institution.name }} <span class="font-mono text-slate-400">{{ institution.institution_number }}</span></p>
         </div>
-        <Link href="/web/applications/new" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700">Submit New Application</Link>
+        <Link v-if="!hasActiveApplication" href="/web/applications/new" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700">Submit New Application</Link>
+        <span v-else class="cursor-not-allowed rounded-md bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-400" title="You already have an application that is submitted or under review.">Submit New Application</span>
     </div>
 
     <div v-if="institution" class="mt-6 grid gap-6 lg:grid-cols-2">

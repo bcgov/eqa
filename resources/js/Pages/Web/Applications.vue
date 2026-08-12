@@ -9,6 +9,11 @@ defineProps({
 
 const flash = computed(() => usePage().props.flash || {})
 
+const activeStatuses = ['Pending Review', 'Under Review', 'Suitability Review']
+const hasActiveApplication = computed(() =>
+    ((usePage().props.applications) || []).some((a) => activeStatuses.includes(a.status))
+)
+
 function statusClass(s) {
     if (s === 'Approved') return 'bg-green-100 text-green-700'
     if (s === 'Not Approved') return 'bg-red-100 text-red-700'
@@ -22,12 +27,14 @@ function statusClass(s) {
     <Head title="Applications" />
 
     <div v-if="flash.success" class="mb-4 rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700">{{ flash.success }}</div>
+    <div v-if="flash.error" class="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{{ flash.error }}</div>
 
     <div class="flex flex-wrap items-center justify-between gap-3">
         <h1 class="text-2xl font-bold text-slate-800">Applications
             <span v-if="institution" class="text-base font-normal text-slate-500">for {{ institution.name }}</span>
         </h1>
-        <Link href="/web/applications/new" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Submit New Application</Link>
+        <Link v-if="!hasActiveApplication" href="/web/applications/new" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Submit New Application</Link>
+        <span v-else class="cursor-not-allowed rounded-md bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-400" title="You already have an application that is submitted or under review.">Submit New Application</span>
     </div>
 
     <div class="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
