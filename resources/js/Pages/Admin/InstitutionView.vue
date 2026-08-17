@@ -1,6 +1,6 @@
 <script setup>
-import { Head, Link, router, usePage } from '@inertiajs/vue3'
-import { computed } from 'vue'
+import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3'
+import { computed, ref } from 'vue'
 
 const props = defineProps({
     institution: { type: Object, default: null },
@@ -8,10 +8,49 @@ const props = defineProps({
     campuses: { type: Array, default: () => [] },
     users: { type: Array, default: () => [] },
     dbas: { type: Array, default: () => [] },
+    designationOptions: { type: Object, default: () => ({ statuses: [], standings: [], ptibRequired: false, ptibQaMetThrough: '' }) },
 })
 
 const flash = computed(() => usePage().props.flash || {})
 const instId = computed(() => props.institution?.crm_id)
+
+// PTIB Standing is only relevant/required when QA is met through PTIB Designation.
+const ptibRequired = computed(() => props.designationOptions?.ptibRequired === true)
+const ptibBlocksDesignation = computed(() =>
+    ptibRequired.value && designationForm.ptib_standing !== 'In Good Standing')
+
+const editingDesignation = ref(false)
+const designationForm = useForm({
+    eqa_status: props.institution?.eqa_status ?? 'Pending',
+    eqa_standing: props.institution?.eqa_standing ?? '',
+    ptib_standing: props.institution?.ptib_standing ?? '',
+    designation_start: props.institution?.designation_start ?? '',
+    designation_expiry: props.institution?.designation_expiry ?? '',
+    ptib_cert_expiry: props.institution?.ptib_cert_expiry ?? '',
+})
+
+const selectClass = 'mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-slate-500 focus:outline-none'
+
+function saveDesignation() {
+    designationForm
+        .transform((data) => {
+            const out = { ...data }
+            for (const k of ['eqa_standing', 'ptib_standing', 'designation_start', 'designation_expiry', 'ptib_cert_expiry']) {
+                if (out[k] === '') out[k] = null
+            }
+            return out
+        })
+        .put(`/admin/institutions/${instId.value}/designation`, {
+            preserveScroll: true,
+            onSuccess: () => { editingDesignation.value = false },
+        })
+}
+
+function cancelDesignation() {
+    designationForm.reset()
+    designationForm.clearErrors()
+    editingDesignation.value = false
+}
 
 function address(c) {
     return [c.street1, c.street2, c.street3, c.city, c.province, c.postal_code].filter(Boolean).join(', ')
@@ -81,14 +120,65 @@ function removeDba(d) {
 
     <div class="mt-6 grid gap-6 lg:grid-cols-3">
         <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 class="mb-3 text-sm font-semibold text-slate-700">Designation Information</h2>
-            <dl class="divide-y divide-slate-100 text-sm">
+            <div class="mb-3 flex items-center justify-between">
+                <h2 class="text-sm font-semibold text-slate-700">Designation Information</h2>
+                <button v-if="!editingDesignation" type="button" @click="editingDesignation = true"
+                    class="text-xs font-semibold text-indigo-600 hover:underline">Manage</button>
+            </div>
+
+            <dl v-if="!editingDesignation" class="divide-y divide-slate-100 text-sm">
                 <div class="flex justify-between py-2"><dt class="text-slate-500">EQA Status</dt><dd class="text-slate-800">{{ institution?.eqa_status || '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">EQA Standing</dt><dd class="text-slate-800">{{ institution?.eqa_standing || '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">PTIB Standing</dt><dd class="text-slate-800">{{ institution?.ptib_standing || '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Designation Start</dt><dd class="text-slate-800">{{ institution?.designation_start || '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Designation Expiry</dt><dd class="text-slate-800">{{ institution?.designation_expiry || '—' }}</dd></div>
+                <div class="flex justify-between py-2"><dt class="text-slate-500">PTIB Cert Expiry</dt><dd class="text-slate-800">{{ institution?.ptib_cert_expiry || '—' }}</dd></div>
             </dl>
+
+            <form v-else @submit.prevent="saveDesignation" class="space-y-3 text-sm">
+                <label class="block"><span class="text-slate-500">EQA Status</span>
+                    <select v-model="designationForm.eqa_status" :class="selectClass">
+                        <option v-for="s in designationOptions.statuses" :key="s" :value="s">{{ s }}</option>
+                    </select>
+                    <span v-if="designationForm.errors.eqa_status" class="mt-1 block text-xs text-red-600">{{ designationForm.errors.eqa_status }}</span>
+                </label>
+                <label class="block"><span class="text-slate-500">EQA Standing</span>
+                    <select v-model="designationForm.eqa_standing" :class="selectClass">
+                        <option value="">—</option>
+                        <option v-for="s in designationOptions.standings" :key="s" :value="s">{{ s }}</option>
+                    </select>
+                </label>
+                <label class="block"><span class="text-slate-500">PTIB Standing<span v-if="ptibRequired" class="text-red-500"> *</span></span>
+                    <select v-model="designationForm.ptib_standing" :class="selectClass">
+                        <option value="">—</option>
+                        <option v-for="s in designationOptions.standings" :key="s" :value="s">{{ s }}</option>
+                    </select>
+                    <span v-if="designationForm.errors.ptib_standing" class="mt-1 block text-xs text-red-600">{{ designationForm.errors.ptib_standing }}</span>
+                    <span v-else-if="!ptibRequired" class="mt-1 block text-xs text-slate-400">Not applicable — QA is not met through PTIB Designation.</span>
+                </label>
+                <label class="block"><span class="text-slate-500">Designation Start</span>
+                    <input type="date" v-model="designationForm.designation_start" :class="selectClass" />
+                </label>
+                <label class="block"><span class="text-slate-500">Designation Expiry</span>
+                    <input type="date" v-model="designationForm.designation_expiry" :class="selectClass" />
+                </label>
+                <label class="block"><span class="text-slate-500">PTIB Cert Expiry</span>
+                    <input type="date" v-model="designationForm.ptib_cert_expiry" :class="selectClass" />
+                </label>
+                <p v-if="ptibRequired && designationForm.eqa_status === 'Designated' && ptibBlocksDesignation"
+                    class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                    QA is met through PTIB Designation, so this institution cannot be <span class="font-medium">Designated</span> unless PTIB Standing is <span class="font-medium">In Good Standing</span>.
+                </p>
+                <p class="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                    Setting EQA Status to <span class="font-medium">Designated</span> stamps the start/expiry dates if empty. Changing a standing updates the locked “in good standing” value on this institution's open applications.<span v-if="ptibRequired"> Because QA is met through PTIB Designation, PTIB Standing is required and must be In Good Standing to designate.</span>
+                </p>
+                <div class="flex items-center gap-2 pt-1">
+                    <button type="submit" :disabled="designationForm.processing"
+                        class="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50">Save</button>
+                    <button type="button" @click="cancelDesignation"
+                        class="rounded-md border border-slate-300 px-4 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">Cancel</button>
+                </div>
+            </form>
         </div>
         <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <h2 class="mb-3 text-sm font-semibold text-slate-700">Institution Details</h2>

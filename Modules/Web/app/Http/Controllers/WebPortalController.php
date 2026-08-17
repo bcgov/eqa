@@ -560,11 +560,49 @@ class WebPortalController extends Controller
         }
 
         $data = $request->validate([
+            // Student Enrolment Information
             'total_enrolment' => ['nullable', 'integer', 'min:0'],
             'intl_students_permit' => ['nullable', 'integer', 'min:0'],
             'intl_students_other' => ['nullable', 'integer', 'min:0'],
             'in_person_students' => ['nullable', 'integer', 'min:0'],
+            'online_students' => ['nullable', 'integer', 'min:0'],
             'enrolment_type' => ['nullable', 'string', 'max:50'],
+            // Type of Education Offered
+            'program_associate_degree' => ['boolean'],
+            'program_university_transfer' => ['boolean'],
+            'program_bachelors_degree' => ['boolean'],
+            'program_graduate_degree' => ['boolean'],
+            'program_career_training' => ['boolean'],
+            'program_language_training' => ['boolean'],
+            'program_theological_education' => ['boolean'],
+            'program_trades_apprenticeship' => ['boolean'],
+            // SABC
+            'sabc_designation' => ['boolean'],
+            // EQA Brand Usage Plan
+            'media_pamphlet' => ['boolean'],
+            'media_website' => ['boolean'],
+            'media_brochure' => ['boolean'],
+            'media_poster' => ['boolean'],
+            'media_banner' => ['boolean'],
+            'media_billboard' => ['boolean'],
+            'brand_usage_plan' => ['nullable', 'string', 'max:2000'],
+            'affiliates_partners' => ['nullable', 'string', 'max:2000'],
+            'other_logos_trademarks' => ['nullable', 'string', 'max:2000'],
+            // Conditions of use — the institution must affirm each before submitting.
+            'affirm_policy_manual' => ['accepted'],
+            'affirm_website_compliance' => ['accepted'],
+            'affirm_written_permission' => ['accepted'],
+            'affirm_branding_guide' => ['accepted'],
+            'affirm_understands_comply' => ['accepted'],
+            'affirm_authorized' => ['accepted'],
+            'representative_signature' => ['required', 'string', 'max:255'],
+        ], [
+            'affirm_policy_manual.accepted' => 'You must confirm all conditions of use before submitting.',
+            'affirm_website_compliance.accepted' => 'You must confirm all conditions of use before submitting.',
+            'affirm_written_permission.accepted' => 'You must confirm all conditions of use before submitting.',
+            'affirm_branding_guide.accepted' => 'You must confirm all conditions of use before submitting.',
+            'affirm_understands_comply.accepted' => 'You must confirm all conditions of use before submitting.',
+            'affirm_authorized.accepted' => 'You must confirm all conditions of use before submitting.',
         ]);
 
         $maxNum = (int) DB::table('applications')

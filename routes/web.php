@@ -86,6 +86,7 @@ Route::get('/admin/institutions', function () {
 Route::get('/admin/institutions/{crmId}', [InstitutionController::class, 'show'])->name('admin.institution.show');
 Route::get('/admin/institutions/{crmId}/edit', [InstitutionController::class, 'edit'])->name('admin.institution.edit');
 Route::put('/admin/institutions/{crmId}', [InstitutionController::class, 'update'])->name('admin.institution.update');
+Route::put('/admin/institutions/{crmId}/designation', [InstitutionController::class, 'updateDesignation'])->name('admin.institution.designation.update');
 Route::get('/admin/institutions/{crmId}/campuses/new', [InstitutionController::class, 'createCampus'])->name('admin.institution.campus.new');
 Route::post('/admin/institutions/{crmId}/campuses', [InstitutionController::class, 'storeCampus'])->name('admin.institution.campus.store');
 Route::get('/admin/institutions/{crmId}/campuses/{campusId}/edit', [InstitutionController::class, 'editCampus'])->name('admin.institution.campus.edit');

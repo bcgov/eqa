@@ -11,6 +11,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Modules\Admin\Services\DesignationService;
 
 /**
  * Drives the EQA application approval Business Process Flow (migrated from the
@@ -144,6 +145,11 @@ class ApplicationWorkflowController extends Controller
                 break;
             case 'begin_review':
                 $updates['status'] = 'Under Review';
+                // The application's "EQA / PTIB in Good Standing" are a locked copy
+                // of the institution's current standing (mirrors the Dynamics form).
+                $standing = app(DesignationService::class)->standingFromInstitution($application->institution_crm_id);
+                $updates['eqa_good_standing'] = $standing['eqa_good_standing'];
+                $updates['ptib_good_standing'] = $standing['ptib_good_standing'];
                 break;
             case 'eligible':
             case 'ineligible':
@@ -178,7 +184,19 @@ class ApplicationWorkflowController extends Controller
                 break;
         }
 
-        DB::table('applications')->where('crm_id', $crmId)->update($updates);
+        DB::transaction(function () use ($crmId, $updates, $action, $application, $today): void {
+            DB::table('applications')->where('crm_id', $crmId)->update($updates);
+
+            // The designation decision cascades onto the institution's Designated
+            // status (EQA Status) — the tight coupling migrated from the CRM BPF.
+            $designation = app(DesignationService::class);
+            if (in_array($action, ['approve', 'pass'], true)) {
+                $expiry = $updates['designation_expiry'] ?? $application->designation_expiry;
+                $designation->onApplicationApproved($application, $today, $expiry);
+            } elseif (in_array($action, ['finalize', 'fail'], true)) {
+                $designation->onApplicationNotApproved($application);
+            }
+        });
 
         return back()->with('success', 'Application advanced to '.str_replace('_', ' ', $next).'.');
     }
