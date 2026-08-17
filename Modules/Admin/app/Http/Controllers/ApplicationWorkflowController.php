@@ -145,7 +145,7 @@ class ApplicationWorkflowController extends Controller
                 break;
             case 'begin_review':
                 $updates['status'] = 'Under Review';
-                // The application's "EQA / PTIB in Good Standing" are a locked copy
+                // The application's "EQA / PTIRU in Good Standing" are a locked copy
                 // of the institution's current standing (mirrors the Dynamics form).
                 $standing = app(DesignationService::class)->standingFromInstitution($application->institution_crm_id);
                 $updates['eqa_good_standing'] = $standing['eqa_good_standing'];

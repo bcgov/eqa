@@ -49,7 +49,7 @@ function standingClass(s) {
                     <th class="px-3 py-2.5">Primary Contact</th>
                     <th class="px-3 py-2.5">EQA Status</th>
                     <th class="px-3 py-2.5">EQA Standing</th>
-                    <th class="px-3 py-2.5">PTIB Standing</th>
+                    <th class="px-3 py-2.5">PTIRU Standing</th>
                     <th class="px-3 py-2.5">Designation Start</th>
                     <th class="px-3 py-2.5">City</th>
                     <th class="px-3 py-2.5">Province</th>

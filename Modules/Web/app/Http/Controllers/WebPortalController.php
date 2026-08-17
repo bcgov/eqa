@@ -129,7 +129,7 @@ class WebPortalController extends Controller
         return Inertia::render('Web/EditInstitution', [
             'institution' => $institution,
             'qaOptions' => [
-                'Private Training Institutions Branch (PTIB) Designation',
+                'Private Training Institutions Regulatory Unit (PTIRU) Designation',
                 'Public Institution Legislation',
                 'Ministry Review Process',
                 'Ministers consent under the Degree Authorization Act (DAA)',

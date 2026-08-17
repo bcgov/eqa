@@ -42,8 +42,8 @@ class InstitutionController extends Controller
             'designationOptions' => [
                 'statuses' => DesignationService::EQA_STATUSES,
                 'standings' => DesignationService::STANDINGS,
-                'ptibRequired' => DesignationService::ptibRequired($institution->qa_met_through),
-                'ptibQaMetThrough' => DesignationService::PTIB_QA_MET_THROUGH,
+                'ptibRequired' => DesignationService::ptiruRequired($institution->qa_met_through),
+                'ptibQaMetThrough' => DesignationService::PTIRU_QA_MET_THROUGH,
             ],
             'applications' => Schema::hasTable('applications')
                 ? DB::table('applications')->where('institution_crm_id', $crmId)->orderByDesc('application_date')->get()
@@ -70,7 +70,7 @@ class InstitutionController extends Controller
         return Inertia::render('Web/EditInstitution', [
             'institution' => $institution,
             'qaOptions' => [
-                'Private Training Institutions Branch (PTIB) Designation',
+                'Private Training Institutions Regulatory Unit (PTIRU) Designation',
                 'Public Institution Legislation',
                 'Ministry Review Process',
                 'Ministers consent under the Degree Authorization Act (DAA)',
@@ -112,14 +112,14 @@ class InstitutionController extends Controller
         DB::table('institutions')->where('crm_id', $crmId)->update($data);
 
         // Changing QA Met Through can invalidate an existing Designated status
-        // (PTIB Standing only gates designation under the PTIB pathway).
+        // (PTIRU Standing only gates designation under the PTIRU pathway).
         app(DesignationService::class)->reconcileAfterQaChange($crmId);
 
         return redirect("/admin/institutions/{$crmId}")->with('success', 'Institution details updated.');
     }
 
     /**
-     * Ministry sets the institution's Designated status (EQA Status), EQA / PTIB
+     * Ministry sets the institution's Designated status (EQA Status), EQA / PTIRU
      * Standing and designation dates. Applies the coupled business rules and
      * cascades the standing onto the institution's open applications.
      */
@@ -128,9 +128,9 @@ class InstitutionController extends Controller
         $institution = $this->institution($crmId);
         abort_if($institution === null, 404);
 
-        // PTIB Standing is required and gates designation only when this
-        // institution's QA is met through PTIB Designation.
-        $ptibRequired = DesignationService::ptibRequired($institution->qa_met_through);
+        // PTIRU Standing is required and gates designation only when this
+        // institution's QA is met through PTIRU Designation.
+        $ptibRequired = DesignationService::ptiruRequired($institution->qa_met_through);
 
         $validator = Validator::make($request->all(), [
             'eqa_status' => ['required', Rule::in(DesignationService::EQA_STATUSES)],
@@ -138,17 +138,16 @@ class InstitutionController extends Controller
             'ptib_standing' => [$ptibRequired ? 'required' : 'nullable', Rule::in(DesignationService::STANDINGS)],
             'designation_start' => ['nullable', 'date'],
             'designation_expiry' => ['nullable', 'date'],
-            'ptib_cert_expiry' => ['nullable', 'date'],
         ], [
-            'ptib_standing.required' => 'PTIB Standing is required when QA is met through PTIB Designation.',
+            'ptib_standing.required' => 'PTIRU Standing is required when QA is met through PTIRU Designation.',
         ]);
 
         $validator->after(function ($validator) use ($request, $institution): void {
             if ($request->input('eqa_status') === 'Designated'
-                && ! DesignationService::ptibPermitsDesignation($institution->qa_met_through, $request->input('ptib_standing'))) {
+                && ! DesignationService::ptiruPermitsDesignation($institution->qa_met_through, $request->input('ptib_standing'))) {
                 $validator->errors()->add(
                     'eqa_status',
-                    'EQA Status cannot be Designated because QA is met through PTIB Designation and PTIB Standing is not In Good Standing.'
+                    'EQA Status cannot be Designated because QA is met through PTIRU Designation and PTIRU Standing is not In Good Standing.'
                 );
             }
         });

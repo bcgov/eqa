@@ -1,5 +1,6 @@
 <script setup>
 import { Head, Link, useForm } from '@inertiajs/vue3'
+import { computed } from 'vue'
 
 const props = defineProps({
     institution: { type: Object, default: null },
@@ -11,6 +12,18 @@ const props = defineProps({
 })
 
 const inputClass = 'mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none'
+
+// Backward compatible: keep whatever QA Met Through value is already stored on
+// the institution selectable even if it is a legacy label (e.g. the old
+// "Private Training Institutions Branch (PTIB) Designation") not in the option list.
+const qaOptionsWithCurrent = computed(() => {
+    const current = props.institution?.qa_met_through
+    const opts = [...props.qaOptions]
+    if (current && !opts.includes(current)) {
+        opts.push(current)
+    }
+    return opts
+})
 
 const form = useForm({
     name: props.institution?.name ?? '',
@@ -69,7 +82,7 @@ function submit() {
                 <label class="block"><span class="text-sm text-slate-600">Quality Assurance Met Through</span>
                     <select v-model="form.qa_met_through" :class="inputClass">
                         <option value="">—</option>
-                        <option v-for="o in qaOptions" :key="o" :value="o">{{ o }}</option>
+                        <option v-for="o in qaOptionsWithCurrent" :key="o" :value="o">{{ o }}</option>
                     </select>
                 </label>
                 <label class="block"><span class="text-sm text-slate-600">Web URL</span>
