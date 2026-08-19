@@ -1,5 +1,6 @@
 <script setup>
 import { Head, Link, useForm } from '@inertiajs/vue3'
+import InfoTooltip from '../../Components/InfoTooltip.vue'
 
 const props = defineProps({
     institution: { type: Object, default: null },
@@ -97,6 +98,7 @@ function submit() {
                 <h2 class="mb-4 text-sm font-semibold text-slate-700">Student Enrolment Information</h2>
                 <div class="grid gap-4 sm:grid-cols-2">
                     <label class="block"><span class="text-sm text-slate-600">Total Institution Enrolment</span>
+                        <InfoTooltip class="ml-1" title="Total Institution Enrolment" text="Total Institution Enrolment includes all students (domestic and international) in all programs at the institution over the past 12 months." />
                         <input v-model="form.total_enrolment" type="number" min="0" :class="inputClass" />
                     </label>
                     <label class="block"><span class="text-sm text-slate-600">Enrolment Type</span>
@@ -112,6 +114,7 @@ function submit() {
                         <input v-model="form.intl_students_other" type="number" min="0" :class="inputClass" />
                     </label>
                     <label class="block"><span class="text-sm text-slate-600">Total Number of In-Person Students</span>
+                        <InfoTooltip class="ml-1" title="Total Number of In-Person Students" text="Include the number of students enrolled in a program where either 100% of the hours of instruction are delivered in-person or a combination of in-person and online delivery." />
                         <input v-model="form.in_person_students" type="number" min="0" :class="inputClass" />
                     </label>
                     <label class="block"><span class="text-sm text-slate-600">Total Number of Online Students</span>

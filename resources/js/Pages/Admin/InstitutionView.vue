@@ -14,6 +14,10 @@ const props = defineProps({
 const flash = computed(() => usePage().props.flash || {})
 const instId = computed(() => props.institution?.crm_id)
 
+const institutionAddress = computed(() =>
+    [props.institution?.street1, props.institution?.street2].filter(Boolean).join(', ')
+)
+
 // PTIRU Standing is only relevant/required when QA is met through PTIRU Designation.
 const ptibRequired = computed(() => props.designationOptions?.ptibRequired === true)
 const ptibBlocksDesignation = computed(() =>
@@ -185,8 +189,11 @@ function removeDba(d) {
                 <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Business Owner Name</dt><dd class="text-right text-slate-800">{{ institution?.business_owner || '—' }}</dd></div>
                 <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Primary Contact</dt><dd class="text-right text-slate-800">{{ institution?.primary_contact || '—' }}</dd></div>
                 <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Website</dt><dd class="max-w-[16rem] truncate text-right text-slate-800"><a v-if="institution?.website" :href="institution.website" target="_blank" rel="noopener" class="text-indigo-600 hover:underline">{{ institution.website }}</a><span v-else>—</span></dd></div>
+                <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Address</dt><dd class="text-right text-slate-800">{{ institutionAddress || '—' }}</dd></div>
                 <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">City</dt><dd class="text-right text-slate-800">{{ institution?.city || '—' }}</dd></div>
                 <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Province</dt><dd class="text-right text-slate-800">{{ institution?.province || '—' }}</dd></div>
+                <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Postal Code</dt><dd class="text-right text-slate-800">{{ institution?.postal_code || '—' }}</dd></div>
+                <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Country</dt><dd class="text-right text-slate-800">{{ institution?.country || '—' }}</dd></div>
             </dl>
         </div>
         <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
