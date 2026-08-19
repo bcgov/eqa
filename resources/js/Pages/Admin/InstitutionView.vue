@@ -18,6 +18,41 @@ const institutionAddress = computed(() =>
     [props.institution?.street1, props.institution?.street2].filter(Boolean).join(', ')
 )
 
+const filterSelectClass = 'rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 focus:border-slate-500 focus:outline-none'
+
+// Applications filter by status, defaults to Show All.
+const applicationStatusFilter = ref('')
+const applicationStatuses = computed(() =>
+    [...new Set(props.applications.map((a) => a.status).filter(Boolean))].sort()
+)
+const filteredApplications = computed(() =>
+    applicationStatusFilter.value
+        ? props.applications.filter((a) => a.status === applicationStatusFilter.value)
+        : props.applications
+)
+
+// Locations / Contacts / DBAs default to Active.
+const locationStatusFilter = ref('Active')
+const filteredCampuses = computed(() =>
+    locationStatusFilter.value === 'all'
+        ? props.campuses
+        : props.campuses.filter((c) => (c.status || 'Inactive') === locationStatusFilter.value)
+)
+
+const contactStatusFilter = ref('Active')
+const filteredUsers = computed(() =>
+    contactStatusFilter.value === 'all'
+        ? props.users
+        : props.users.filter((u) => (u.web_user_active ? 'Active' : 'Inactive') === contactStatusFilter.value)
+)
+
+const dbaStatusFilter = ref('Active')
+const filteredDbas = computed(() =>
+    dbaStatusFilter.value === 'all'
+        ? props.dbas
+        : props.dbas.filter((d) => (d.status || 'Inactive') === dbaStatusFilter.value)
+)
+
 // PTIRU Standing is only relevant/required when QA is met through PTIRU Designation.
 const ptibRequired = computed(() => props.designationOptions?.ptibRequired === true)
 const ptibBlocksDesignation = computed(() =>
@@ -209,7 +244,13 @@ function removeDba(d) {
     </div>
 
     <div class="mt-8 flex items-center justify-between">
-        <h2 class="text-lg font-semibold text-slate-800">Applications <span class="text-sm font-normal text-slate-500">({{ applications.length }})</span></h2>
+        <h2 class="text-lg font-semibold text-slate-800">Applications <span class="text-sm font-normal text-slate-500">({{ filteredApplications.length }})</span></h2>
+        <label class="flex items-center gap-2 text-xs text-slate-500">Status
+            <select v-model="applicationStatusFilter" :class="filterSelectClass">
+                <option value="">Show All</option>
+                <option v-for="s in applicationStatuses" :key="s" :value="s">{{ s }}</option>
+            </select>
+        </label>
     </div>
     <div class="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
         <table class="min-w-full divide-y divide-slate-200 text-sm">
@@ -224,7 +265,7 @@ function removeDba(d) {
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
-                <tr v-for="a in applications" :key="a.crm_id" class="hover:bg-slate-50">
+                <tr v-for="a in filteredApplications" :key="a.crm_id" class="hover:bg-slate-50">
                     <td class="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-600">{{ a.reference }}</td>
                     <td class="px-3 py-2">
                         <span class="rounded px-2 py-0.5 text-xs font-medium" :class="applicationStatusClass(a.status)">{{ a.status || '—' }}</span>
@@ -236,14 +277,23 @@ function removeDba(d) {
                         <Link :href="`/admin/applications/${a.crm_id}`" class="font-medium text-indigo-600 hover:underline">Review →</Link>
                     </td>
                 </tr>
-                <tr v-if="applications.length === 0"><td colspan="6" class="px-3 py-6 text-center text-sm text-slate-400">No applications recorded.</td></tr>
+                <tr v-if="filteredApplications.length === 0"><td colspan="6" class="px-3 py-6 text-center text-sm text-slate-400">No applications recorded.</td></tr>
             </tbody>
         </table>
     </div>
 
     <div class="mt-8 flex items-center justify-between">
-        <h2 class="text-lg font-semibold text-slate-800">Locations <span class="text-sm font-normal text-slate-500">({{ campuses.length }})</span></h2>
-        <Link :href="`/admin/institutions/${instId}/campuses/new`" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700">Add Location</Link>
+        <h2 class="text-lg font-semibold text-slate-800">Locations <span class="text-sm font-normal text-slate-500">({{ filteredCampuses.length }})</span></h2>
+        <div class="flex items-center gap-3">
+            <label class="flex items-center gap-2 text-xs text-slate-500">Status
+                <select v-model="locationStatusFilter" :class="filterSelectClass">
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                    <option value="all">Show All</option>
+                </select>
+            </label>
+            <Link :href="`/admin/institutions/${instId}/campuses/new`" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700">Add Location</Link>
+        </div>
     </div>
     <div class="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
         <table class="min-w-full divide-y divide-slate-200 text-sm">
@@ -257,7 +307,7 @@ function removeDba(d) {
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
-                <tr v-for="c in campuses" :key="c.crm_id" class="align-top hover:bg-slate-50">
+                <tr v-for="c in filteredCampuses" :key="c.crm_id" class="align-top hover:bg-slate-50">
                     <td class="px-3 py-2 font-medium text-slate-800">{{ c.location_name || c.name || '—' }}</td>
                     <td class="px-3 py-2 text-slate-600">{{ address(c) || '—' }}</td>
                     <td class="px-3 py-2">
@@ -275,14 +325,23 @@ function removeDba(d) {
                         </div>
                     </td>
                 </tr>
-                <tr v-if="campuses.length === 0"><td colspan="5" class="px-3 py-6 text-center text-sm text-slate-400">No locations recorded.</td></tr>
+                <tr v-if="filteredCampuses.length === 0"><td colspan="5" class="px-3 py-6 text-center text-sm text-slate-400">No locations recorded.</td></tr>
             </tbody>
         </table>
     </div>
 
     <div class="mt-8 flex items-center justify-between">
-        <h2 class="text-lg font-semibold text-slate-800">Contacts <span class="text-sm font-normal text-slate-500">({{ users.length }})</span></h2>
-        <Link :href="`/admin/institutions/${instId}/users/new`" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700">Add Contact</Link>
+        <h2 class="text-lg font-semibold text-slate-800">Contacts <span class="text-sm font-normal text-slate-500">({{ filteredUsers.length }})</span></h2>
+        <div class="flex items-center gap-3">
+            <label class="flex items-center gap-2 text-xs text-slate-500">Status
+                <select v-model="contactStatusFilter" :class="filterSelectClass">
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                    <option value="all">Show All</option>
+                </select>
+            </label>
+            <Link :href="`/admin/institutions/${instId}/users/new`" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700">Add Contact</Link>
+        </div>
     </div>
     <div class="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
         <table class="min-w-full divide-y divide-slate-200 text-sm">
@@ -297,7 +356,7 @@ function removeDba(d) {
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
-                <tr v-for="u in users" :key="u.crm_id" class="hover:bg-slate-50">
+                <tr v-for="u in filteredUsers" :key="u.crm_id" class="hover:bg-slate-50">
                     <td class="px-3 py-2 font-medium text-slate-800">{{ u.full_name || '—' }}</td>
                     <td class="px-3 py-2 text-slate-600">{{ u.job_title || '—' }}</td>
                     <td class="px-3 py-2">
@@ -316,14 +375,23 @@ function removeDba(d) {
                         </div>
                     </td>
                 </tr>
-                <tr v-if="users.length === 0"><td colspan="6" class="px-3 py-6 text-center text-sm text-slate-400">No contacts recorded.</td></tr>
+                <tr v-if="filteredUsers.length === 0"><td colspan="6" class="px-3 py-6 text-center text-sm text-slate-400">No contacts recorded.</td></tr>
             </tbody>
         </table>
     </div>
 
     <div class="mt-8 flex items-center justify-between">
-        <h2 class="text-lg font-semibold text-slate-800">DBAs <span class="text-sm font-normal text-slate-500">({{ dbas.length }})</span></h2>
-        <Link :href="`/admin/institutions/${instId}/dbas/new`" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700">Add DBA</Link>
+        <h2 class="text-lg font-semibold text-slate-800">DBAs <span class="text-sm font-normal text-slate-500">({{ filteredDbas.length }})</span></h2>
+        <div class="flex items-center gap-3">
+            <label class="flex items-center gap-2 text-xs text-slate-500">Status
+                <select v-model="dbaStatusFilter" :class="filterSelectClass">
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                    <option value="all">Show All</option>
+                </select>
+            </label>
+            <Link :href="`/admin/institutions/${instId}/dbas/new`" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700">Add DBA</Link>
+        </div>
     </div>
     <div class="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
         <table class="min-w-full divide-y divide-slate-200 text-sm">
@@ -337,7 +405,7 @@ function removeDba(d) {
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
-                <tr v-for="d in dbas" :key="d.crm_id" class="align-top hover:bg-slate-50">
+                <tr v-for="d in filteredDbas" :key="d.crm_id" class="align-top hover:bg-slate-50">
                     <td class="px-3 py-2 font-medium text-slate-800">{{ d.name || '—' }}</td>
                     <td class="px-3 py-2 text-slate-600">{{ address(d) || '—' }}</td>
                     <td class="px-3 py-2 text-slate-600">{{ d.email || '—' }}</td>
@@ -352,7 +420,7 @@ function removeDba(d) {
                         </div>
                     </td>
                 </tr>
-                <tr v-if="dbas.length === 0"><td colspan="5" class="px-3 py-6 text-center text-sm text-slate-400">No DBAs recorded.</td></tr>
+                <tr v-if="filteredDbas.length === 0"><td colspan="5" class="px-3 py-6 text-center text-sm text-slate-400">No DBAs recorded.</td></tr>
             </tbody>
         </table>
     </div>
