@@ -6,13 +6,55 @@ const props = defineProps({
     institutions: { type: Array, default: () => [] },
 })
 
+const columns = [
+    { key: 'institution_number', label: 'Institution ID' },
+    { key: 'name', label: 'Institution Name' },
+    { key: 'qa_met_through', label: 'QA Met Through' },
+    { key: 'primary_contact', label: 'Primary Contact' },
+    { key: 'eqa_status', label: 'EQA Status' },
+    { key: 'eqa_standing', label: 'EQA Standing' },
+    { key: 'ptib_standing', label: 'PTIRU Standing' },
+    { key: 'designation_start', label: 'Designation Start' },
+    { key: 'city', label: 'City' },
+    { key: 'province', label: 'Province' },
+    { key: 'website', label: 'Website' },
+    { key: 'dba_count', label: 'DBAs', align: 'center' },
+]
+
 const search = ref('')
+const eqaStatusFilter = ref('')
+const sortKey = ref('name')
+const sortDir = ref('asc')
+
+const eqaStatuses = computed(() =>
+    [...new Set(props.institutions.map((i) => i.eqa_status).filter(Boolean))].sort(),
+)
+
+function sortBy(key) {
+    if (sortKey.value === key) {
+        sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+    } else {
+        sortKey.value = key
+        sortDir.value = 'asc'
+    }
+}
+
+function compare(a, b, key) {
+    const av = a[key] ?? ''
+    const bv = b[key] ?? ''
+    if (typeof av === 'number' && typeof bv === 'number') return av - bv
+    return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' })
+}
+
 const filtered = computed(() => {
     const q = search.value.trim().toLowerCase()
-    if (!q) return props.institutions
-    return props.institutions.filter((i) =>
-        [i.name, i.institution_number, i.city].some((v) => (v || '').toLowerCase().includes(q)),
-    )
+    let rows = props.institutions.filter((i) => {
+        const matchesSearch = !q || [i.name, i.institution_number, i.city].some((v) => (v || '').toLowerCase().includes(q))
+        const matchesStatus = !eqaStatusFilter.value || i.eqa_status === eqaStatusFilter.value
+        return matchesSearch && matchesStatus
+    })
+    rows = [...rows].sort((a, b) => compare(a, b, sortKey.value) * (sortDir.value === 'asc' ? 1 : -1))
+    return rows
 })
 
 function standingClass(s) {
@@ -31,30 +73,35 @@ function standingClass(s) {
             <h1 class="text-2xl font-bold text-slate-800">Institutions</h1>
             <p class="text-sm text-slate-500">{{ filtered.length }} of {{ institutions.length }} institutions · migrated from Dynamics</p>
         </div>
-        <input
-            v-model="search"
-            type="search"
-            placeholder="Search name, ID or city…"
-            class="w-64 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-slate-500 focus:outline-none"
-        />
+        <div class="flex flex-wrap items-center gap-3">
+            <label class="flex items-center gap-2 text-sm text-slate-500">EQA Status
+                <select v-model="eqaStatusFilter" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-slate-500 focus:outline-none">
+                    <option value="">All</option>
+                    <option v-for="s in eqaStatuses" :key="s" :value="s">{{ s }}</option>
+                </select>
+            </label>
+            <input
+                v-model="search"
+                type="search"
+                placeholder="Search name, ID or city…"
+                class="w-64 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-slate-500 focus:outline-none"
+            />
+        </div>
     </div>
 
     <div class="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
         <table class="min-w-full divide-y divide-slate-200 text-sm">
             <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                    <th class="px-3 py-2.5">Institution ID</th>
-                    <th class="px-3 py-2.5">Institution Name</th>
-                    <th class="px-3 py-2.5">QA Met Through</th>
-                    <th class="px-3 py-2.5">Primary Contact</th>
-                    <th class="px-3 py-2.5">EQA Status</th>
-                    <th class="px-3 py-2.5">EQA Standing</th>
-                    <th class="px-3 py-2.5">PTIRU Standing</th>
-                    <th class="px-3 py-2.5">Designation Start</th>
-                    <th class="px-3 py-2.5">City</th>
-                    <th class="px-3 py-2.5">Province</th>
-                    <th class="px-3 py-2.5">Website</th>
-                    <th class="px-3 py-2.5 text-center">DBAs</th>
+                    <th v-for="col in columns" :key="col.key"
+                        class="cursor-pointer select-none px-3 py-2.5 hover:text-slate-700"
+                        :class="col.align === 'center' ? 'text-center' : ''"
+                        @click="sortBy(col.key)">
+                        <span class="inline-flex items-center gap-1">
+                            {{ col.label }}
+                            <span class="text-slate-400">{{ sortKey === col.key ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span>
+                        </span>
+                    </th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
