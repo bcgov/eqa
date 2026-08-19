@@ -130,6 +130,7 @@ function removeDba(d) {
             </div>
 
             <dl v-if="!editingDesignation" class="divide-y divide-slate-100 text-sm">
+                <div class="flex justify-between py-2"><dt class="text-slate-500">QA Met Through</dt><dd class="text-right text-slate-800">{{ institution?.qa_met_through || '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">EQA Status</dt><dd class="text-slate-800">{{ institution?.eqa_status || '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">EQA Standing</dt><dd class="text-slate-800">{{ institution?.eqa_standing || '—' }}</dd></div>
                 <div v-if="ptibRequired" class="flex justify-between py-2"><dt class="text-slate-500">PTIRU Standing</dt><dd class="text-slate-800">{{ institution?.ptib_standing || '—' }}</dd></div>
@@ -185,7 +186,6 @@ function removeDba(d) {
                 <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Legal Name</dt><dd class="text-right text-slate-800">{{ institution?.legal_name || '—' }}</dd></div>
                 <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">BC Incorporation Number</dt><dd class="text-right text-slate-800">{{ institution?.bc_incorporation_number || '—' }}</dd></div>
                 <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">DLI Number</dt><dd class="text-right text-slate-800">{{ institution?.dli_number || '—' }}</dd></div>
-                <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">QA Met Through</dt><dd class="text-right text-slate-800">{{ institution?.qa_met_through || '—' }}</dd></div>
                 <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Business Owner Name</dt><dd class="text-right text-slate-800">{{ institution?.business_owner || '—' }}</dd></div>
                 <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Primary Contact</dt><dd class="text-right text-slate-800">{{ institution?.primary_contact || '—' }}</dd></div>
                 <div class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Website</dt><dd class="max-w-[16rem] truncate text-right text-slate-800"><a v-if="institution?.website" :href="institution.website" target="_blank" rel="noopener" class="text-indigo-600 hover:underline">{{ institution.website }}</a><span v-else>—</span></dd></div>
