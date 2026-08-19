@@ -139,7 +139,18 @@ Route::get('/admin/applications/{crmId}', function (string $crmId) {
         ? DB::table('invoices')->where('application_crm_id', $crmId)->first()
         : null;
 
-    return Inertia::render('Admin/ApplicationReview', ['application' => $application, 'invoice' => $invoice]);
+    // PTIRU Standing is only relevant when the institution's quality assurance is
+    // met through the Private Training designation, so surface its QA Met Through
+    // value to let the review screen hide the PTIRU standing check otherwise.
+    $qaMetThrough = ($application->institution_crm_id && Schema::hasTable('institutions'))
+        ? optional(DB::table('institutions')->where('crm_id', $application->institution_crm_id)->first())->qa_met_through
+        : null;
+
+    return Inertia::render('Admin/ApplicationReview', [
+        'application' => $application,
+        'invoice' => $invoice,
+        'qaMetThrough' => $qaMetThrough,
+    ]);
 })->name('admin.application.review');
 
 Route::post('/admin/applications/{crmId}/advance', [ApplicationWorkflowController::class, 'advance'])->name('admin.application.advance');

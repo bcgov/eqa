@@ -5,10 +5,20 @@ import { ref, computed } from 'vue'
 const props = defineProps({
     application: { type: Object, default: () => ({}) },
     invoice: { type: Object, default: null },
+    qaMetThrough: { type: String, default: null },
 })
 
 const page = usePage()
 const flash = computed(() => page.props.flash || {})
+
+// PTIRU Standing is only relevant when QA is met through the Private Training
+// designation. Match both the legacy "(PTIB)" label and the renamed "(PTIRU)" one,
+// so the PTIRU good-standing check is hidden for every other QA pathway
+// (e.g. Public Institution Legislation, Degree Authorization Act, Ministry Review).
+const showPtiru = computed(() => {
+    const qa = props.qaMetThrough
+    return typeof qa === 'string' && (qa.includes('(PTIB)') || qa.includes('(PTIRU)'))
+})
 
 const stage = computed(() => props.application.workflow_stage || 'draft')
 
@@ -190,7 +200,7 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
             <p class="mb-3 text-sm text-slate-600">Record the standing checks, then decide the eligibility outcome.</p>
             <div class="mb-4 flex flex-wrap gap-5">
                 <label class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" v-model="eqaGood" class="rounded"> EQA in Good Standing</label>
-                <label class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" v-model="ptibGood" class="rounded"> PTIRU in Good Standing</label>
+                <label v-if="showPtiru" class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" v-model="ptibGood" class="rounded"> PTIRU in Good Standing</label>
             </div>
             <div class="flex flex-wrap gap-2">
                 <button :disabled="busy" @click="advance('eligible', { eqa_good_standing: eqaGood, ptib_good_standing: ptibGood })" :class="[btn, 'bg-green-600 hover:bg-green-700']">Eligibility Met — Approve</button>
@@ -264,7 +274,7 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
                     </label>
                     <div class="flex flex-col gap-2 pt-1 sm:col-span-2">
                         <label class="flex items-center gap-2"><input type="checkbox" v-model="form.eqa_good_standing" :disabled="locked" class="rounded"> EQA in Good Standing</label>
-                        <label class="flex items-center gap-2"><input type="checkbox" v-model="form.ptib_good_standing" :disabled="locked" class="rounded"> PTIRU in Good Standing</label>
+                        <label v-if="showPtiru" class="flex items-center gap-2"><input type="checkbox" v-model="form.ptib_good_standing" :disabled="locked" class="rounded"> PTIRU in Good Standing</label>
                         <label class="flex items-center gap-2"><input type="checkbox" v-model="form.need_additional_details" :disabled="locked" class="rounded"> Need Additional Details</label>
                     </div>
                 </div>
