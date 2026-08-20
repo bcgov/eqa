@@ -8,6 +8,7 @@ const props = defineProps({
     campuses: { type: Array, default: () => [] },
     users: { type: Array, default: () => [] },
     dbas: { type: Array, default: () => [] },
+    sentEmails: { type: Array, default: () => [] },
     designationOptions: { type: Object, default: () => ({ statuses: [], standings: [], ptibRequired: false, ptibQaMetThrough: '' }) },
 })
 
@@ -39,11 +40,11 @@ const filteredCampuses = computed(() =>
         : props.campuses.filter((c) => (c.status || 'Inactive') === locationStatusFilter.value)
 )
 
-const contactStatusFilter = ref('Active')
+const contactStatusFilter = ref('all')
 const filteredUsers = computed(() =>
     contactStatusFilter.value === 'all'
         ? props.users
-        : props.users.filter((u) => (u.web_user_active ? 'Active' : 'Inactive') === contactStatusFilter.value)
+        : props.users.filter((u) => (u.account_disabled ? 'Inactive' : 'Active') === contactStatusFilter.value)
 )
 
 const dbaStatusFilter = ref('Active')
@@ -52,6 +53,16 @@ const filteredDbas = computed(() =>
         ? props.dbas
         : props.dbas.filter((d) => (d.status || 'Inactive') === dbaStatusFilter.value)
 )
+
+// Sent-emails audit log: view a single message body in a modal.
+const emailModal = ref(null)
+const openEmail = (e) => { emailModal.value = e }
+const closeEmail = () => { emailModal.value = null }
+const emailDateTime = (v) => {
+    if (!v) return '—'
+    const d = new Date(String(v).replace(' ', 'T'))
+    return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString()
+}
 
 // PTIRU Standing is only relevant/required when QA is met through PTIRU Designation.
 const ptibRequired = computed(() => props.designationOptions?.ptibRequired === true)
@@ -114,13 +125,33 @@ function removeCampus(c) {
         router.delete(`/admin/institutions/${instId.value}/campuses/${c.crm_id}`)
     }
 }
-function toggleUser(u) {
-    router.patch(`/admin/institutions/${instId.value}/users/${u.crm_id}/toggle`)
+
+const staffRoleClass = (active) =>
+    active ? 'bg-green-600 text-white' : 'bg-white text-green-700 hover:bg-green-50'
+
+function switchStaffRole(u, role) {
+    if (!u.user_id || u.access_type === role) return
+    if (!confirm(`Switch ${u.full_name || u.email}'s role to: ${role}?`)) return
+    router.put(`/admin/institutions/${instId.value}/staff/${u.user_id}/role`, { role }, { preserveScroll: true })
 }
-function removeUser(u) {
-    if (confirm(`Remove ${u.full_name || 'this contact'}? This cannot be undone.`)) {
-        router.delete(`/admin/institutions/${instId.value}/users/${u.crm_id}`)
+function switchStaffStatus(u, disabled) {
+    if (!u.user_id || u.account_disabled === disabled) return
+    if (!confirm(`Switch ${u.full_name || u.email}'s status to: ${disabled ? 'Inactive' : 'Active'}?`)) return
+    router.put(`/admin/institutions/${instId.value}/staff/${u.user_id}/status`, { disabled }, { preserveScroll: true })
+}
+
+const fetchingBceid = ref(null)
+function fetchBceid(u) {
+    if (fetchingBceid.value) return
+    if (!u.bceid_username && !u.web_user_name) {
+        alert('This contact has no BCeID username to look up.')
+        return
     }
+    fetchingBceid.value = u.crm_id
+    router.post(`/admin/institutions/${instId.value}/staff/${u.crm_id}/fetch-bceid`, {}, {
+        preserveScroll: true,
+        onFinish: () => { fetchingBceid.value = null },
+    })
 }
 
 function toggleDba(d) {
@@ -141,6 +172,7 @@ function removeDba(d) {
     </div>
 
     <div v-if="flash.success" class="mb-4 rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700">{{ flash.success }}</div>
+    <div v-if="flash.error" class="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{{ flash.error }}</div>
 
     <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -331,13 +363,13 @@ function removeDba(d) {
     </div>
 
     <div class="mt-8 flex items-center justify-between">
-        <h2 class="text-lg font-semibold text-slate-800">Contacts <span class="text-sm font-normal text-slate-500">({{ filteredUsers.length }})</span></h2>
+        <h2 class="text-lg font-semibold text-slate-800">Institution Staff <span class="text-sm font-normal text-slate-500">— BCeID Accounts ({{ filteredUsers.length }})</span></h2>
         <div class="flex items-center gap-3">
             <label class="flex items-center gap-2 text-xs text-slate-500">Status
                 <select v-model="contactStatusFilter" :class="filterSelectClass">
+                    <option value="all">Show All</option>
                     <option value="Active">Active</option>
                     <option value="Inactive">Inactive</option>
-                    <option value="all">Show All</option>
                 </select>
             </label>
             <Link :href="`/admin/institutions/${instId}/users/new`" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700">Add Contact</Link>
@@ -348,34 +380,66 @@ function removeDba(d) {
             <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
                     <th class="px-3 py-2.5">Name</th>
-                    <th class="px-3 py-2.5">Job Title</th>
-                    <th class="px-3 py-2.5">Role</th>
                     <th class="px-3 py-2.5">Email</th>
-                    <th class="px-3 py-2.5">Active</th>
-                    <th class="px-3 py-2.5"></th>
+                    <th class="px-3 py-2.5">User ID</th>
+                    <th class="px-3 py-2.5">GUID</th>
+                    <th class="px-3 py-2.5">Business (BCeID)</th>
+                    <th class="px-3 py-2.5">Role</th>
+                    <th class="px-3 py-2.5">Status</th>
+                    <!-- <th class="px-3 py-2.5 text-right">BCeID</th> -->
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
                 <tr v-for="u in filteredUsers" :key="u.crm_id" class="hover:bg-slate-50">
                     <td class="px-3 py-2 font-medium text-slate-800">{{ u.full_name || '—' }}</td>
-                    <td class="px-3 py-2 text-slate-600">{{ u.job_title || '—' }}</td>
-                    <td class="px-3 py-2">
-                        <span v-if="u.role" class="rounded px-2 py-0.5 text-xs font-medium" :class="u.role === 'Primary' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'">{{ u.role }}</span>
-                        <span v-else class="text-xs text-slate-400">—</span>
-                    </td>
                     <td class="px-3 py-2 text-slate-600">{{ u.email || '—' }}</td>
-                    <td class="px-3 py-2">
-                        <span class="rounded px-2 py-0.5 text-xs font-medium" :class="u.web_user_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'">{{ u.web_user_active ? 'Active' : 'Inactive' }}</span>
+                    <td class="px-3 py-2 font-mono text-xs text-slate-500">{{ u.bceid_username || '—' }}</td>
+                    <td class="px-3 py-2 font-mono text-xs uppercase text-slate-500">{{ u.bceid_user_guid || '—' }}</td>
+                    <td class="px-3 py-2 text-xs text-slate-600">
+                        <div>{{ u.bceid_business_legal_name || '—' }}</div>
+                        <div v-if="u.bceid_business_guid" class="font-mono uppercase text-slate-400">{{ u.bceid_business_guid }}</div>
                     </td>
                     <td class="px-3 py-2">
-                        <div class="flex items-center gap-2 whitespace-nowrap text-xs">
-                            <Link :href="`/admin/institutions/${instId}/users/${u.crm_id}/edit`" class="text-indigo-600 hover:underline">Edit</Link>
-                            <button type="button" @click="toggleUser(u)" class="text-amber-600 hover:underline">{{ u.web_user_active ? 'Deactivate' : 'Reactivate' }}</button>
-                            <button type="button" @click="removeUser(u)" class="text-red-600 hover:underline">Remove</button>
+                        <span v-if="!u.user_id" class="text-xs text-slate-400">No account</span>
+                        <div v-else class="inline-flex overflow-hidden rounded-md border border-green-600 text-xs font-medium" role="group" aria-label="Toggle staff role">
+                            <button
+                                v-for="r in ['Admin', 'User', 'Guest']"
+                                :key="r"
+                                type="button"
+                                class="border-l border-green-600 px-3 py-1.5 first:border-l-0 transition"
+                                :class="staffRoleClass(u.access_type === r)"
+                                @click="switchStaffRole(u, r)"
+                            >{{ r }}</button>
                         </div>
                     </td>
+                    <td class="px-3 py-2">
+                        <span v-if="!u.user_id" class="text-xs text-slate-400">—</span>
+                        <div v-else class="inline-flex overflow-hidden rounded-md border border-green-600 text-xs font-medium" role="group" aria-label="Toggle staff status">
+                            <button
+                                type="button"
+                                class="px-3 py-1.5 transition"
+                                :class="staffRoleClass(!u.account_disabled)"
+                                @click="switchStaffStatus(u, false)"
+                            >Active</button>
+                            <button
+                                type="button"
+                                class="border-l border-green-600 px-3 py-1.5 transition"
+                                :class="staffRoleClass(u.account_disabled)"
+                                @click="switchStaffStatus(u, true)"
+                            >Inactive</button>
+                        </div>
+                    </td>
+                    <!-- <td class="px-3 py-2 text-right">
+                        <button
+                            type="button"
+                            class="rounded-md border border-indigo-600 px-2.5 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            :disabled="fetchingBceid === u.crm_id || (!u.bceid_username && !u.web_user_name)"
+                            :title="(!u.bceid_username && !u.web_user_name) ? 'No BCeID username on this contact' : 'Fetch BCeID User GUID, Business GUID and Legal Name'"
+                            @click="fetchBceid(u)"
+                        >{{ fetchingBceid === u.crm_id ? 'Fetching…' : 'Fetch BCeID' }}</button>
+                    </td> -->
                 </tr>
-                <tr v-if="filteredUsers.length === 0"><td colspan="6" class="px-3 py-6 text-center text-sm text-slate-400">No contacts recorded.</td></tr>
+                <tr v-if="filteredUsers.length === 0"><td colspan="8" class="px-3 py-6 text-center text-sm text-slate-400">No staff recorded.</td></tr>
             </tbody>
         </table>
     </div>
@@ -423,5 +487,57 @@ function removeDba(d) {
                 <tr v-if="filteredDbas.length === 0"><td colspan="5" class="px-3 py-6 text-center text-sm text-slate-400">No DBAs recorded.</td></tr>
             </tbody>
         </table>
+    </div>
+
+    <div class="mt-8 flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-slate-800">Emails <span class="text-sm font-normal text-slate-500">({{ sentEmails.length }})</span></h2>
+    </div>
+    <div class="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+        <table class="min-w-full divide-y divide-slate-200 text-sm">
+            <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr>
+                    <th class="px-3 py-2.5">Sent</th>
+                    <th class="px-3 py-2.5">Template</th>
+                    <th class="px-3 py-2.5">Subject</th>
+                    <th class="px-3 py-2.5">Recipient</th>
+                    <th class="px-3 py-2.5">Status</th>
+                    <th class="px-3 py-2.5"></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                <tr v-for="e in sentEmails" :key="e.id" class="align-top hover:bg-slate-50">
+                    <td class="px-3 py-2 whitespace-nowrap text-slate-600">{{ emailDateTime(e.sent_at || e.created_at) }}</td>
+                    <td class="px-3 py-2 text-slate-600">{{ e.template_name || e.template_key || '—' }}</td>
+                    <td class="px-3 py-2 font-medium text-slate-800">{{ e.subject || '—' }}</td>
+                    <td class="px-3 py-2 text-slate-600">
+                        {{ e.recipient || '—' }}
+                        <span v-if="e.intended_recipient" class="block text-xs text-amber-600">redirected (intended: {{ e.intended_recipient }})</span>
+                    </td>
+                    <td class="px-3 py-2">
+                        <span class="rounded px-2 py-0.5 text-xs font-medium" :class="e.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'">{{ e.status || '—' }}</span>
+                        <span v-if="e.error" class="block text-xs text-red-500">{{ e.error }}</span>
+                    </td>
+                    <td class="px-3 py-2 text-xs">
+                        <button type="button" @click="openEmail(e)" class="text-indigo-600 hover:underline">View</button>
+                    </td>
+                </tr>
+                <tr v-if="sentEmails.length === 0"><td colspan="6" class="px-3 py-6 text-center text-sm text-slate-400">No emails sent.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div v-if="emailModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" @click.self="closeEmail">
+        <div class="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
+            <div class="flex items-start justify-between border-b border-slate-200 px-4 py-3">
+                <div>
+                    <h3 class="text-base font-semibold text-slate-800">{{ emailModal.subject || '(no subject)' }}</h3>
+                    <p class="mt-0.5 text-xs text-slate-500">
+                        To {{ emailModal.recipient || '—' }} · {{ emailDateTime(emailModal.sent_at || emailModal.created_at) }}
+                    </p>
+                </div>
+                <button type="button" @click="closeEmail" class="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            <div class="overflow-y-auto px-4 py-4 text-sm text-slate-700" v-html="emailModal.body || '<em>(empty body)</em>'"></div>
+        </div>
     </div>
 </template>

@@ -35,4 +35,16 @@ return [
         ],
     ],
 
+    // BC gov SSO via PDEX / Keycloak. PDEX authenticates the user and POSTs the
+    // signed token back to /pdex-login; the API credentials drive PdexService.
+    'pdex' => [
+        'login_url' => env('PDEX_LOGIN_URL'),
+        'logout_url' => env('PDEX_LOGOUT_URL'),
+        'jwt_audience' => env('PDEX_JWT_AUDIENCE'),
+        'api_url' => env('PDEX_API_URL'),
+        'client_id' => env('PDEX_CLIENT_ID'),
+        'client_secret' => env('PDEX_CLIENT_SECRET'),
+        'token_endpoint' => env('PDEX_TOKEN_ENDPOINT'),
+    ],
+
 ];

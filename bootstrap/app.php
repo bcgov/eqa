@@ -24,6 +24,15 @@ return Application::configure(basePath: dirname(__DIR__))
         \App\Http\Middleware\HandleInertiaRequests::class,
         \Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets::class,
     ]);
+
+    // PDEX posts the SSO token back to /pdex-login from its own origin, so it
+    // cannot carry our CSRF token.
+    $middleware->validateCsrfTokens(except: ['pdex-login']);
+
+    $middleware->alias([
+        'is.active' => \App\Http\Middleware\IsActive::class,
+        'role' => \App\Http\Middleware\HasRole::class,
+    ]);
 })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

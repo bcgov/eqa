@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Modules\Admin\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\Role;
+use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
@@ -14,7 +17,10 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
+use Modules\Admin\Services\BceidService;
 use Modules\Admin\Services\DesignationService;
+use Modules\Admin\Services\ProcessNotifier;
+use RuntimeException;
 
 /**
  * Ministry (IDIR) admin view of a single institution, mirroring the legacy
@@ -51,11 +57,12 @@ class InstitutionController extends Controller
             'campuses' => Schema::hasTable('campuses')
                 ? DB::table('campuses')->where('institution_crm_id', $crmId)->orderByDesc('primary_location')->orderBy('name')->get()
                 : collect(),
-            'users' => Schema::hasTable('institution_users')
-                ? DB::table('institution_users')->where('institution_crm_id', $crmId)->orderBy('full_name')->get()
-                : collect(),
+            'users' => $this->institutionStaff($crmId),
             'dbas' => Schema::hasTable('dbas')
                 ? DB::table('dbas')->where('institution_crm_id', $crmId)->orderBy('name')->get()
+                : collect(),
+            'sentEmails' => Schema::hasTable('sent_emails')
+                ? DB::table('sent_emails')->where('institution_crm_id', $crmId)->orderByDesc('sent_at')->orderByDesc('id')->get()
                 : collect(),
         ]);
     }
@@ -111,11 +118,24 @@ class InstitutionController extends Controller
 
         DB::table('institutions')->where('crm_id', $crmId)->update($data);
 
+        // Mirror the legacy InstitutionNotificationEmail plugin: when key data
+        // fields change, notify the EQA mailbox with a diff. Gated by the global
+        // master switch (default OFF), so this is a no-op until enabled.
+        app(ProcessNotifier::class)->institutionChanged($institution, $data, $this->adminActor());
+
         // Changing QA Met Through can invalidate an existing Designated status
         // (PTIRU Standing only gates designation under the PTIRU pathway).
         app(DesignationService::class)->reconcileAfterQaChange($crmId);
 
         return redirect("/admin/institutions/{$crmId}")->with('success', 'Institution details updated.');
+    }
+
+    /**
+     * Human label for the acting ministry (IDIR) user, for change notifications.
+     */
+    private function adminActor(): string
+    {
+        return (string) (request()->user()->name ?? 'Ministry user');
     }
 
     /**
@@ -213,6 +233,8 @@ class InstitutionController extends Controller
             'institution_name' => $institution->name,
         ]));
 
+        app(ProcessNotifier::class)->campusCreated($data, (string) $institution->name, $crmId, $this->adminActor());
+
         return redirect("/admin/institutions/{$crmId}")->with('success', 'Location added.');
     }
 
@@ -228,6 +250,8 @@ class InstitutionController extends Controller
         }
 
         DB::table('campuses')->where('crm_id', $campusId)->update($data);
+
+        app(ProcessNotifier::class)->campusChanged($campus, $data, $this->adminActor());
 
         return redirect("/admin/institutions/{$crmId}")->with('success', 'Location updated.');
     }
@@ -327,6 +351,8 @@ class InstitutionController extends Controller
             'institution_name' => $institution->name,
         ]));
 
+        app(ProcessNotifier::class)->portalUserCreated($data, $institution);
+
         return redirect("/admin/institutions/{$crmId}")->with('success', 'Contact added.');
     }
 
@@ -383,6 +409,154 @@ class InstitutionController extends Controller
         return $data;
     }
 
+    // --- Institution staff (BCeID user accounts) -----------------------
+
+    private const INSTITUTION_ROLES = [Role::INSTITUTION_ADMIN, Role::INSTITUTION_USER, Role::INSTITUTION_GUEST];
+
+    /**
+     * The institution's contacts, each joined to its BCeID user account (matched
+     * on guid or email) so the grid can show and toggle the account's role and
+     * active status. Run `institution-users:migrate` to seed the accounts.
+     *
+     * @return Collection<int, object>
+     */
+    private function institutionStaff(string $crmId): Collection
+    {
+        if (! Schema::hasTable('institution_users')) {
+            return collect();
+        }
+
+        $contacts = DB::table('institution_users')
+            ->where('institution_crm_id', $crmId)
+            ->orderBy('full_name')
+            ->get();
+
+        $guids = $contacts->pluck('bceid_user_guid')->filter()->map(fn ($g) => Str::lower($g))->all();
+        $emails = $contacts->pluck('email')->filter()->map(fn ($e) => Str::lower($e))->all();
+
+        $accounts = User::with('roles')
+            ->where(function ($q) use ($guids, $emails): void {
+                if ($guids !== []) {
+                    $q->orWhereIn(DB::raw('lower(bceid_user_guid)'), $guids);
+                }
+                if ($emails !== []) {
+                    $q->orWhereIn(DB::raw('lower(email)'), $emails);
+                }
+            })
+            ->get();
+
+        return $contacts->map(function (object $contact) use ($accounts) {
+            $account = $accounts->first(fn (User $u) => $this->accountMatchesContact($u, $contact));
+            $roles = $account ? $account->roles->pluck('name') : collect();
+
+            $contact->user_id = $account?->id;
+            $contact->bceid_username = $contact->bceid_username ?: $account?->bceid_username;
+            $contact->access_type = $account === null ? null
+                : ($roles->contains(Role::INSTITUTION_ADMIN) ? 'Admin'
+                    : ($roles->contains(Role::INSTITUTION_GUEST) ? 'Guest' : 'User'));
+            $contact->account_disabled = $account ? (bool) $account->disabled : null;
+
+            return $contact;
+        });
+    }
+
+    private function accountMatchesContact(User $user, object $contact): bool
+    {
+        // Strong match: the BCeID User GUID (unique per BCeID account).
+        if (! empty($contact->bceid_user_guid) && ! empty($user->bceid_user_guid)
+            && Str::lower($user->bceid_user_guid) === Str::lower($contact->bceid_user_guid)) {
+            return true;
+        }
+
+        // Strong match: the BCeID logon.
+        if (! empty($contact->bceid_username) && ! empty($user->bceid_username)
+            && Str::upper($user->bceid_username) === Str::upper($contact->bceid_username)) {
+            return true;
+        }
+
+        // Fallback to email ONLY when neither side has a BCeID identity — legacy/test
+        // data reuses placeholder emails across many contacts, so matching a BCeID
+        // account by a shared email would attach the wrong person.
+        $contactHasBceid = ! empty($contact->bceid_username) || ! empty($contact->bceid_user_guid);
+        $userHasBceid = ! empty($user->bceid_username) || ! empty($user->bceid_user_guid);
+
+        return ! $contactHasBceid && ! $userHasBceid
+            && ! empty($contact->email) && ! empty($user->email)
+            && Str::lower($user->email) === Str::lower($contact->email);
+    }
+
+    public function updateStaffRole(Request $request, string $crmId, User $user): RedirectResponse
+    {
+        abort_if($this->institution($crmId) === null, 404);
+        $data = $request->validate(['role' => ['required', 'in:Admin,User,Guest']]);
+
+        $newRole = match ($data['role']) {
+            'Admin' => Role::INSTITUTION_ADMIN,
+            'User' => Role::INSTITUTION_USER,
+            default => Role::INSTITUTION_GUEST,
+        };
+
+        $role = Role::firstOrCreate(['name' => $newRole]);
+        $user->roles()->detach(Role::whereIn('name', self::INSTITUTION_ROLES)->pluck('id'));
+        $user->roles()->attach($role->id);
+
+        return redirect("/admin/institutions/{$crmId}")->with('success', 'Staff role updated.');
+    }
+
+    public function updateStaffStatus(Request $request, string $crmId, User $user): RedirectResponse
+    {
+        abort_if($this->institution($crmId) === null, 404);
+        $data = $request->validate(['disabled' => ['required', 'boolean']]);
+
+        $user->update(['disabled' => $data['disabled']]);
+
+        return redirect("/admin/institutions/{$crmId}")->with('success', 'Staff status updated.');
+    }
+
+    /**
+     * Resolve a contact's BCeID username into its User GUID, Business GUID and
+     * Business Legal Name via the BCeID web service, and persist them onto the
+     * institution_users record. Mirrors the legacy Dynamics "Fetch BCeID Data".
+     */
+    public function fetchBceid(string $crmId, string $userId, BceidService $bceid): RedirectResponse
+    {
+        abort_if($this->institution($crmId) === null, 404);
+
+        $contact = DB::table('institution_users')
+            ->where('crm_id', $userId)
+            ->where('institution_crm_id', $crmId)
+            ->first();
+        abort_if($contact === null, 404);
+
+        $username = trim((string) ($contact->bceid_username ?: $contact->web_user_name ?? ''));
+        if ($username === '') {
+            return redirect("/admin/institutions/{$crmId}")
+                ->with('error', 'This contact has no BCeID username to look up.');
+        }
+
+        try {
+            $result = $bceid->search($username);
+        } catch (RuntimeException $e) {
+            return redirect("/admin/institutions/{$crmId}")
+                ->with('error', "BCeID lookup failed: {$e->getMessage()}");
+        }
+
+        if (! $result['found']) {
+            return redirect("/admin/institutions/{$crmId}")
+                ->with('error', "No BCeID account found for username \"{$username}\".");
+        }
+
+        DB::table('institution_users')->where('crm_id', $userId)->update([
+            'bceid_user_guid' => $result['user_guid'],
+            'bceid_business_guid' => $result['business_guid'],
+            'bceid_business_legal_name' => $result['business_legal_name'],
+            'bceid_fetched_at' => now(),
+        ]);
+
+        return redirect("/admin/institutions/{$crmId}")
+            ->with('success', "BCeID data fetched for \"{$username}\".");
+    }
+
     // --- DBAs ----------------------------------------------------------
 
     private function dba(string $crmId, string $dbaId): ?object
@@ -425,11 +599,15 @@ class InstitutionController extends Controller
         $institution = $this->institution($crmId);
         abort_if($institution === null, 404);
 
-        DB::table('dbas')->insert(array_merge($this->validatedDba($request), [
+        $data = $this->validatedDba($request);
+
+        DB::table('dbas')->insert(array_merge($data, [
             'crm_id' => (string) Str::uuid(),
             'institution_crm_id' => $crmId,
             'institution_name' => $institution->name,
         ]));
+
+        app(ProcessNotifier::class)->dbaCreated($data, (string) $institution->name, $crmId, $this->adminActor());
 
         return redirect("/admin/institutions/{$crmId}")->with('success', 'DBA added.');
     }
@@ -439,7 +617,10 @@ class InstitutionController extends Controller
         $dba = $this->dba($crmId, $dbaId);
         abort_if($dba === null, 404);
 
-        DB::table('dbas')->where('crm_id', $dbaId)->update($this->validatedDba($request));
+        $data = $this->validatedDba($request);
+        DB::table('dbas')->where('crm_id', $dbaId)->update($data);
+
+        app(ProcessNotifier::class)->dbaChanged($dba, $data, $this->adminActor());
 
         return redirect("/admin/institutions/{$crmId}")->with('success', 'DBA updated.');
     }

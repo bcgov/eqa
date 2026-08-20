@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
+use Modules\Admin\Services\ProcessNotifier;
 
 /**
  * The institution (BCeID) web portal: an institution views its own profile
@@ -166,6 +167,8 @@ class WebPortalController extends Controller
 
         DB::table('institutions')->where('crm_id', $institution->crm_id)->update($data);
 
+        app(ProcessNotifier::class)->institutionChanged($institution, $data, $this->portalActor($institution));
+
         return redirect('/web/institution')->with('success', 'Institution details updated.');
     }
 
@@ -232,6 +235,8 @@ class WebPortalController extends Controller
             'institution_name' => $institution->name,
         ]));
 
+        app(ProcessNotifier::class)->campusCreated($data, (string) $institution->name, $institution->crm_id, $this->portalActor($institution));
+
         return redirect('/web/campuses')->with('success', 'Campus '.$data['location_name'].' added.');
     }
 
@@ -247,6 +252,8 @@ class WebPortalController extends Controller
         }
 
         DB::table('campuses')->where('crm_id', $crmId)->update($data);
+
+        app(ProcessNotifier::class)->campusChanged($campus, $data, $this->portalActor($this->institution($request)));
 
         return redirect('/web/campuses')->with('success', 'Campus '.$data['location_name'].' updated.');
     }
@@ -367,6 +374,8 @@ class WebPortalController extends Controller
             'institution_name' => $institution->name,
         ]));
 
+        app(ProcessNotifier::class)->dbaCreated($data, (string) $institution->name, $institution->crm_id, $this->portalActor($institution));
+
         return redirect('/web/dbas')->with('success', 'DBA '.$data['name'].' added.');
     }
 
@@ -377,6 +386,8 @@ class WebPortalController extends Controller
 
         $data = $this->validatedDba($request);
         DB::table('dbas')->where('crm_id', $crmId)->update($data);
+
+        app(ProcessNotifier::class)->dbaChanged($dba, $data, $this->portalActor($this->institution($request)));
 
         return redirect('/web/dbas')->with('success', 'DBA '.$data['name'].' updated.');
     }
@@ -480,6 +491,8 @@ class WebPortalController extends Controller
             'institution_name' => $institution->name,
         ]));
 
+        app(ProcessNotifier::class)->portalUserCreated($data, $institution);
+
         return redirect('/web/users')->with('success', 'User '.($data['full_name'] ?? 'contact').' added.');
     }
 
@@ -572,6 +585,8 @@ class WebPortalController extends Controller
             ->value('m');
         $reference = 'APP-'.str_pad((string) ($maxNum + 1), 8, '0', STR_PAD_LEFT);
 
+        $isReapplication = app(ProcessNotifier::class)->isReapplication($institution);
+
         DB::table('applications')->insert(array_merge($data, [
             'crm_id' => (string) Str::uuid(),
             'reference' => $reference,
@@ -584,6 +599,16 @@ class WebPortalController extends Controller
             'total_due' => 0,
         ]));
 
+        app(ProcessNotifier::class)->applicationSubmitted($institution, $reference, $isReapplication);
+
         return redirect('/web/applications')->with('success', 'Application '.$reference.' submitted for review.');
+    }
+
+    /** Human label for the acting institution portal user, for change notifications. */
+    private function portalActor(?object $institution): string
+    {
+        $name = trim((string) ($institution->name ?? ''));
+
+        return $name !== '' ? $name.' (institution portal)' : 'Institution portal';
     }
 }

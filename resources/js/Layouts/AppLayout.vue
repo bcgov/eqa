@@ -5,6 +5,10 @@ import { computed } from 'vue'
 const page = usePage()
 const role = computed(() => page.props.auth?.role ?? 'institution')
 const user = computed(() => page.props.auth?.user ?? null)
+const logoutUrl = computed(() => page.props.logoutUrl ?? '/logout')
+const isMinistryAdmin = computed(() =>
+    (user.value?.roles ?? []).some((r) => r === 'Super Admin' || r === 'Ministry Admin'),
+)
 
 const institutionNav = [
     { label: 'Home', href: '/web' },
@@ -14,14 +18,20 @@ const institutionNav = [
     { label: 'DBAs', href: '/web/dbas' },
     { label: 'Manage Users', href: '/web/users' },
 ]
-const ministryNav = [
+const ministryNav = computed(() => [
     { label: 'Dashboard', href: '/admin' },
     { label: 'Institutions', href: '/admin/institutions' },
     { label: 'DBAs', href: '/admin/dbas' },
     { label: 'Applications', href: '/admin/applications' },
     { label: 'Invoices', href: '/admin/invoices' },
-]
-const nav = computed(() => (role.value === 'ministry' ? ministryNav : institutionNav))
+    ...(isMinistryAdmin.value
+        ? [
+            { label: 'Email Templates', href: '/admin/email-templates' },
+            { label: 'Staff', href: '/admin/staff' },
+        ]
+        : []),
+])
+const nav = computed(() => (role.value === 'ministry' ? ministryNav.value : institutionNav))
 </script>
 
 <template>
@@ -34,9 +44,9 @@ const nav = computed(() => (role.value === 'ministry' ? ministryNav : institutio
                 </Link>
                 <div class="flex items-center gap-4">
                     <span v-if="user" class="hidden text-sm text-slate-200 sm:inline">{{ user.name }}</span>
-                    <Link href="/logout" method="post" as="button" class="rounded bg-white/10 px-3 py-1.5 text-sm font-medium text-white hover:bg-white/20">
+                    <a :href="logoutUrl" class="rounded bg-white/10 px-3 py-1.5 text-sm font-medium text-white hover:bg-white/20">
                         Log off
-                    </Link>
+                    </a>
                 </div>
             </div>
             <nav class="bg-white/5">
