@@ -381,7 +381,7 @@ function removeDba(d) {
                     <option value="Inactive">Inactive</option>
                 </select>
             </label>
-            <Link :href="`/admin/institutions/${instId}/users/new`" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700">Add Contact</Link>
+            <!-- <Link :href="`/admin/institutions/${instId}/users/new`" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700">Add Contact</Link> -->
         </div>
     </div>
     <div class="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
