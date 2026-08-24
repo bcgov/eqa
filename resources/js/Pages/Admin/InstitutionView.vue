@@ -140,6 +140,15 @@ function switchStaffStatus(u, disabled) {
     router.put(`/admin/institutions/${instId.value}/staff/${u.user_id}/status`, { disabled }, { preserveScroll: true })
 }
 
+const canLoginAs = (u) =>
+    !!u.user_id && !!u.bceid_user_guid && !u.account_disabled && (u.access_type === 'Admin' || u.access_type === 'User')
+
+function loginAsStaff(u) {
+    if (!canLoginAs(u)) return
+    if (!confirm(`You are about to leave the Ministry admin and sign in to ${props.institution?.name || 'this institution'} as ${u.full_name || u.email}. Continue?`)) return
+    router.post(`/admin/institutions/${instId.value}/staff/${u.user_id}/login`)
+}
+
 const fetchingBceid = ref(null)
 function fetchBceid(u) {
     if (fetchingBceid.value) return
@@ -386,6 +395,7 @@ function removeDba(d) {
                     <th class="px-3 py-2.5">Business (BCeID)</th>
                     <th class="px-3 py-2.5">Role</th>
                     <th class="px-3 py-2.5">Status</th>
+                    <th class="px-3 py-2.5 text-right">Actions</th>
                     <!-- <th class="px-3 py-2.5 text-right">BCeID</th> -->
                 </tr>
             </thead>
@@ -428,6 +438,15 @@ function removeDba(d) {
                                 @click="switchStaffStatus(u, true)"
                             >Inactive</button>
                         </div>
+                    </td>
+                    <td class="px-3 py-2 text-right">
+                        <button
+                            type="button"
+                            class="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                            :disabled="!canLoginAs(u)"
+                            :title="canLoginAs(u) ? 'Sign in to the institution portal as this staff member' : 'Requires an active Admin or User BCeID account'"
+                            @click="loginAsStaff(u)"
+                        >Login</button>
                     </td>
                     <!-- <td class="px-3 py-2 text-right">
                         <button

@@ -32,6 +32,9 @@ class HandleInertiaRequests extends Middleware
                     : $request->session()->get('portal_user'),
                 'role' => $request->session()->get('portal_role'),
             ],
+            'impersonating' => $request->session()->has('impersonator_id')
+                ? ['name' => $request->session()->get('impersonator_name')]
+                : null,
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),

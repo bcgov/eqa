@@ -10,6 +10,7 @@ use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
@@ -511,6 +512,76 @@ class InstitutionController extends Controller
         $user->update(['disabled' => $data['disabled']]);
 
         return redirect("/admin/institutions/{$crmId}")->with('success', 'Staff status updated.');
+    }
+
+    /**
+     * Ministry "login as" impersonation: switch the current session from the
+     * ministry admin to the selected institution staff account and drop them
+     * into that institution's web portal. The original admin is remembered in
+     * the session so they can return via stopImpersonating().
+     */
+    public function loginAsStaff(Request $request, string $crmId, int $userId): RedirectResponse
+    {
+        $institution = $this->institution($crmId);
+        abort_if($institution === null, 404);
+
+        $target = User::with('roles')->find($userId);
+        abort_if($target === null, 404);
+
+        if ($target->disabled) {
+            return redirect("/admin/institutions/{$crmId}")->with('error', 'That staff account is inactive.');
+        }
+
+        if (empty($target->bceid_user_guid)) {
+            return redirect("/admin/institutions/{$crmId}")->with('error', 'That staff account has no BCeID identity to sign in with.');
+        }
+
+        if (! $target->hasAnyRole([Role::INSTITUTION_ADMIN, Role::INSTITUTION_USER])) {
+            return redirect("/admin/institutions/{$crmId}")->with('error', 'That staff account cannot access the institution portal.');
+        }
+
+        $admin = Auth::user();
+
+        Auth::login($target);
+        $request->session()->regenerate();
+
+        $request->session()->put('impersonator_id', $admin->id);
+        $request->session()->put('impersonator_name', $admin->name);
+        $request->session()->put('portal_role', 'institution');
+        $request->session()->put('portal_user', [
+            'name' => $target->name,
+            'email' => $target->email,
+            'kind' => 'bceid',
+        ]);
+        $request->session()->put('portal_institution', $crmId);
+
+        return redirect('/web');
+    }
+
+    /**
+     * End an impersonation session started by loginAsStaff(): restore the
+     * original ministry admin and return them to the admin portal.
+     */
+    public function stopImpersonating(Request $request): RedirectResponse
+    {
+        $adminId = $request->session()->get('impersonator_id');
+        abort_if($adminId === null, 403);
+
+        $admin = User::find($adminId);
+        abort_if($admin === null, 403);
+
+        Auth::login($admin);
+        $request->session()->regenerate();
+
+        $request->session()->forget(['impersonator_id', 'impersonator_name', 'portal_institution']);
+        $request->session()->put('portal_role', 'ministry');
+        $request->session()->put('portal_user', [
+            'name' => $admin->name,
+            'email' => $admin->email,
+            'kind' => 'idir',
+        ]);
+
+        return redirect('/admin');
     }
 
     /**

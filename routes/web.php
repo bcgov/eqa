@@ -66,6 +66,9 @@ Route::prefix('web')->middleware('is.active:institution')->group(function () {
 
         return Inertia::render('Web/RawPage', ['module' => 'Web', 'page' => $page]);
     })->name('web.view');
+
+    // End a ministry impersonation session and return to the admin portal.
+    Route::post('/stop-impersonating', [InstitutionController::class, 'stopImpersonating'])->name('web.impersonate.stop');
 });
 
 // Ministry (IDIR) admin portal (generated from Dynamics migration later).
@@ -112,6 +115,7 @@ Route::delete('/admin/institutions/{crmId}/users/{userId}', [InstitutionControll
 Route::put('/admin/institutions/{crmId}/staff/{user}/role', [InstitutionController::class, 'updateStaffRole'])->name('admin.institution.staff.role');
 Route::put('/admin/institutions/{crmId}/staff/{user}/status', [InstitutionController::class, 'updateStaffStatus'])->name('admin.institution.staff.status');
 Route::post('/admin/institutions/{crmId}/staff/{userId}/fetch-bceid', [InstitutionController::class, 'fetchBceid'])->name('admin.institution.staff.fetch-bceid');
+Route::post('/admin/institutions/{crmId}/staff/{userId}/login', [InstitutionController::class, 'loginAsStaff'])->name('admin.institution.staff.login');
 Route::get('/admin/institutions/{crmId}/dbas/new', [InstitutionController::class, 'createDba'])->name('admin.institution.dba.new');
 Route::post('/admin/institutions/{crmId}/dbas', [InstitutionController::class, 'storeDba'])->name('admin.institution.dba.store');
 Route::get('/admin/institutions/{crmId}/dbas/{dbaId}/edit', [InstitutionController::class, 'editDba'])->name('admin.institution.dba.edit');
