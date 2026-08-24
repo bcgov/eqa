@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace Modules\Web\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\Role;
+use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -74,10 +77,73 @@ class WebPortalController extends Controller
             return collect();
         }
 
-        return DB::table('institution_users')
+        $contacts = DB::table('institution_users')
             ->where('institution_crm_id', $institution->crm_id)
             ->orderBy('full_name')
             ->get();
+
+        $guids = $contacts->pluck('bceid_user_guid')->filter()->map(fn ($g) => Str::lower($g))->all();
+        $emails = $contacts->pluck('email')->filter()->map(fn ($e) => Str::lower($e))->all();
+
+        $accounts = ($guids === [] && $emails === [])
+            ? collect()
+            : User::with('roles')
+                ->where(function ($q) use ($guids, $emails): void {
+                    if ($guids !== []) {
+                        $q->orWhereIn(DB::raw('lower(bceid_user_guid)'), $guids);
+                    }
+                    if ($emails !== []) {
+                        $q->orWhereIn(DB::raw('lower(email)'), $emails);
+                    }
+                })
+                ->get();
+
+        return $contacts->map(function (object $contact) use ($accounts) {
+            $account = $accounts->first(fn (User $u) => $this->accountMatchesContact($u, $contact));
+            $roles = $account ? $account->roles->pluck('name') : collect();
+
+            $contact->user_id = $account?->id;
+            $contact->access_type = $account === null ? null
+                : ($roles->contains(Role::INSTITUTION_ADMIN) ? 'Admin'
+                    : ($roles->contains(Role::INSTITUTION_GUEST) ? 'Guest' : 'User'));
+            $contact->account_disabled = $account ? (bool) $account->disabled : null;
+
+            return $contact;
+        });
+    }
+
+    /** Does this BCeID account correspond to the given institution contact? */
+    private function accountMatchesContact(User $user, object $contact): bool
+    {
+        if (! empty($contact->bceid_user_guid) && ! empty($user->bceid_user_guid)
+            && Str::lower($user->bceid_user_guid) === Str::lower($contact->bceid_user_guid)) {
+            return true;
+        }
+
+        if (! empty($contact->bceid_username) && ! empty($user->bceid_username)
+            && Str::upper($user->bceid_username) === Str::upper($contact->bceid_username)) {
+            return true;
+        }
+
+        $contactHasBceid = ! empty($contact->bceid_username) || ! empty($contact->bceid_user_guid);
+        $userHasBceid = ! empty($user->bceid_username) || ! empty($user->bceid_user_guid);
+
+        return ! $contactHasBceid && ! $userHasBceid
+            && ! empty($contact->email) && ! empty($user->email)
+            && Str::lower($user->email) === Str::lower($contact->email);
+    }
+
+    /** Guard: the target account must be one of this institution's contacts. */
+    private function accountBelongsToInstitution(User $user, object $institution): bool
+    {
+        if (! DB::getSchemaBuilder()->hasTable('institution_users')) {
+            return false;
+        }
+
+        return DB::table('institution_users')
+            ->where('institution_crm_id', $institution->crm_id)
+            ->get()
+            ->contains(fn (object $contact) => $this->accountMatchesContact($user, $contact));
     }
 
     public function home(Request $request): Response
@@ -435,118 +501,51 @@ class WebPortalController extends Controller
     public function users(Request $request): Response
     {
         $institution = $this->institution($request);
+        $currentUser = Auth::user();
 
         return Inertia::render('Web/Users', [
             'institution' => $institution,
             'users' => $this->usersFor($institution),
+            'canManage' => $currentUser !== null && $currentUser->hasAnyRole([Role::INSTITUTION_ADMIN, Role::SUPER_ADMIN]),
+            'currentUserId' => $currentUser?->id,
         ]);
     }
 
-    private function institutionUser(Request $request, string $crmId): ?object
-    {
-        $institution = $this->institution($request);
-
-        if ($institution === null || ! DB::getSchemaBuilder()->hasTable('institution_users')) {
-            return null;
-        }
-
-        return DB::table('institution_users')
-            ->where('crm_id', $crmId)
-            ->where('institution_crm_id', $institution->crm_id)
-            ->first();
-    }
-
-    public function createUser(Request $request): Response
+    /**
+     * Institution-admin only: switch a staff member's portal access role
+     * (Admin / User / Guest). Institution users cannot otherwise edit staff
+     * details, mirroring the FSG StaffList behaviour.
+     */
+    public function updateStaffRole(Request $request, int $userId): RedirectResponse
     {
         $institution = $this->institution($request);
         abort_if($institution === null, 403);
 
-        return Inertia::render('Web/EditUser', [
-            'institution' => $institution,
-            'user' => null,
-        ]);
-    }
+        $actor = Auth::user();
+        abort_unless($actor !== null && $actor->hasAnyRole([Role::INSTITUTION_ADMIN, Role::SUPER_ADMIN]), 403);
 
-    public function editUser(Request $request, string $crmId): Response
-    {
-        $user = $this->institutionUser($request, $crmId);
-        abort_if($user === null, 404);
+        // An admin cannot change their own role (prevents self lock-out).
+        abort_if($actor->id === $userId, 403);
 
-        return Inertia::render('Web/EditUser', [
-            'institution' => $this->institution($request),
-            'user' => $user,
-        ]);
-    }
+        $data = $request->validate(['role' => ['required', 'in:Admin,User,Guest']]);
 
-    public function storeUser(Request $request): RedirectResponse
-    {
-        $institution = $this->institution($request);
-        abort_if($institution === null, 403);
+        $target = User::with('roles')->find($userId);
+        abort_if($target === null, 404);
+        abort_unless($this->accountBelongsToInstitution($target, $institution), 403);
 
-        $data = $this->validatedUser($request);
+        $newRole = match ($data['role']) {
+            'Admin' => Role::INSTITUTION_ADMIN,
+            'User' => Role::INSTITUTION_USER,
+            default => Role::INSTITUTION_GUEST,
+        };
 
-        DB::table('institution_users')->insert(array_merge($data, [
-            'crm_id' => (string) Str::uuid(),
-            'institution_crm_id' => $institution->crm_id,
-            'institution_name' => $institution->name,
-        ]));
+        $role = Role::firstOrCreate(['name' => $newRole]);
+        $target->roles()->detach(
+            Role::whereIn('name', [Role::INSTITUTION_ADMIN, Role::INSTITUTION_USER, Role::INSTITUTION_GUEST])->pluck('id')
+        );
+        $target->roles()->attach($role->id);
 
-        app(ProcessNotifier::class)->portalUserCreated($data, $institution);
-
-        return redirect('/web/users')->with('success', 'User '.($data['full_name'] ?? 'contact').' added.');
-    }
-
-    public function updateUser(Request $request, string $crmId): RedirectResponse
-    {
-        $user = $this->institutionUser($request, $crmId);
-        abort_if($user === null, 404);
-
-        $data = $this->validatedUser($request);
-
-        DB::table('institution_users')->where('crm_id', $crmId)->update($data);
-
-        return redirect('/web/users')->with('success', 'User '.($data['full_name'] ?? 'contact').' updated.');
-    }
-
-    /** @return array<string, mixed> */
-    private function validatedUser(Request $request): array
-    {
-        $data = $request->validate([
-            'first_name' => ['required', 'string', 'max:100'],
-            'last_name' => ['nullable', 'string', 'max:100'],
-            'job_title' => ['nullable', 'string', 'max:255'],
-            'email' => ['nullable', 'string', 'max:255'],
-            'phone' => ['nullable', 'string', 'max:50'],
-            'mobile' => ['nullable', 'string', 'max:50'],
-            'role' => ['nullable', 'string', 'max:50'],
-            'web_user_name' => ['nullable', 'string', 'max:255'],
-            'web_user_active' => ['boolean'],
-        ]);
-
-        $data['full_name'] = trim(($data['first_name'] ?? '').' '.($data['last_name'] ?? '')) ?: null;
-
-        return $data;
-    }
-
-    public function toggleUser(Request $request, string $crmId): RedirectResponse
-    {
-        $user = $this->institutionUser($request, $crmId);
-        abort_if($user === null, 404);
-
-        $active = ! ($user->web_user_active === true || $user->web_user_active === 't' || $user->web_user_active === 1 || $user->web_user_active === '1');
-        DB::table('institution_users')->where('crm_id', $crmId)->update(['web_user_active' => $active]);
-
-        return redirect('/web/users')->with('success', 'User '.($active ? 'reactivated' : 'deactivated').'.');
-    }
-
-    public function destroyUser(Request $request, string $crmId): RedirectResponse
-    {
-        $user = $this->institutionUser($request, $crmId);
-        abort_if($user === null, 404);
-
-        DB::table('institution_users')->where('crm_id', $crmId)->delete();
-
-        return redirect('/web/users')->with('success', 'User removed.');
+        return redirect('/web/users')->with('success', 'Staff role updated.');
     }
 
     public function create(Request $request): Response|RedirectResponse

@@ -53,12 +53,7 @@ Route::prefix('web')->middleware('is.active:institution')->group(function () {
     Route::patch('/dbas/{crmId}/toggle', [WebPortalController::class, 'toggleDba'])->name('web.dbas.toggle');
     Route::delete('/dbas/{crmId}', [WebPortalController::class, 'destroyDba'])->name('web.dbas.destroy');
     Route::get('/users', [WebPortalController::class, 'users'])->name('web.users');
-    Route::get('/users/new', [WebPortalController::class, 'createUser'])->name('web.users.new');
-    Route::post('/users', [WebPortalController::class, 'storeUser'])->name('web.users.store');
-    Route::get('/users/{crmId}/edit', [WebPortalController::class, 'editUser'])->name('web.users.edit');
-    Route::put('/users/{crmId}', [WebPortalController::class, 'updateUser'])->name('web.users.update');
-    Route::patch('/users/{crmId}/toggle', [WebPortalController::class, 'toggleUser'])->name('web.users.toggle');
-    Route::delete('/users/{crmId}', [WebPortalController::class, 'destroyUser'])->name('web.users.destroy');
+    Route::put('/users/{userId}/role', [WebPortalController::class, 'updateStaffRole'])->name('web.users.role');
 
     // Browse any captured Web page by name (raw migrated views).
     Route::get('/view/{page}', function (string $page) use ($pages) {

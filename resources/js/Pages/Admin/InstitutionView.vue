@@ -395,7 +395,7 @@ function removeDba(d) {
                     <th class="px-3 py-2.5">Business (BCeID)</th>
                     <th class="px-3 py-2.5">Role</th>
                     <th class="px-3 py-2.5">Status</th>
-                    <th class="px-3 py-2.5 text-right">Actions</th>
+                    <!-- <th class="px-3 py-2.5 text-right">Actions</th> -->
                     <!-- <th class="px-3 py-2.5 text-right">BCeID</th> -->
                 </tr>
             </thead>
