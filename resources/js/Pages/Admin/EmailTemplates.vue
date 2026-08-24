@@ -1,6 +1,7 @@
 <script setup>
 import { Head, router, useForm, usePage } from '@inertiajs/vue3'
-import { computed, nextTick, ref } from 'vue'
+import { computed, ref } from 'vue'
+import RichTextEditor from '../../Components/RichTextEditor.vue'
 
 const props = defineProps({
     templates: { type: Array, default: () => [] },
@@ -40,45 +41,6 @@ const form = useForm({
 
 // Body editor mode — "rich" (WYSIWYG) or "raw" (HTML source).
 const editorMode = ref('rich')
-const richEl = ref(null)
-
-// Push the current form.body into the contenteditable element (after the DOM
-// for the edit form has rendered / the mode has switched).
-const syncRichFromForm = () => {
-    nextTick(() => {
-        if (richEl.value && richEl.value.innerHTML !== form.body) {
-            richEl.value.innerHTML = form.body || ''
-        }
-    })
-}
-
-const onRichInput = () => {
-    if (richEl.value) {
-        form.body = richEl.value.innerHTML
-    }
-}
-
-const setEditorMode = (mode) => {
-    if (mode === editorMode.value) {
-        return
-    }
-    editorMode.value = mode
-    if (mode === 'rich') {
-        syncRichFromForm()
-    }
-}
-
-const exec = (command, value = null) => {
-    document.execCommand(command, false, value)
-    onRichInput()
-}
-
-const insertLink = () => {
-    const url = window.prompt('Link URL', 'https://')
-    if (url) {
-        exec('createLink', url)
-    }
-}
 
 const startEdit = (t) => {
     editingId.value = t.id
@@ -88,7 +50,6 @@ const startEdit = (t) => {
     form.recipients = t.recipients || ''
     form.is_active = !!t.is_active
     editorMode.value = 'rich'
-    syncRichFromForm()
 }
 
 const cancelEdit = () => {
@@ -286,13 +247,13 @@ const placeholder = (name) => `{{${name}}}`
                         <div class="inline-flex overflow-hidden rounded-md border border-slate-300 text-xs">
                             <button
                                 type="button"
-                                @click="setEditorMode('rich')"
+                                @click="editorMode = 'rich'"
                                 class="px-3 py-1 font-medium"
                                 :class="editorMode === 'rich' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'"
                             >Rich</button>
                             <button
                                 type="button"
-                                @click="setEditorMode('raw')"
+                                @click="editorMode = 'raw'"
                                 class="border-l border-slate-300 px-3 py-1 font-medium"
                                 :class="editorMode === 'raw' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'"
                             >Raw</button>
@@ -300,26 +261,7 @@ const placeholder = (name) => `{{${name}}}`
                     </div>
 
                     <!-- Rich (WYSIWYG) editor -->
-                    <div v-show="editorMode === 'rich'" class="mt-1">
-                        <div class="flex flex-wrap items-center gap-1 rounded-t-md border border-b-0 border-slate-300 bg-slate-50 px-2 py-1">
-                            <button type="button" title="Bold" @click="exec('bold')" class="h-7 w-7 rounded font-bold text-slate-700 hover:bg-slate-200">B</button>
-                            <button type="button" title="Italic" @click="exec('italic')" class="h-7 w-7 rounded italic text-slate-700 hover:bg-slate-200">I</button>
-                            <button type="button" title="Underline" @click="exec('underline')" class="h-7 w-7 rounded text-slate-700 underline hover:bg-slate-200">U</button>
-                            <span class="mx-1 h-5 w-px bg-slate-300"></span>
-                            <button type="button" title="Bulleted list" @click="exec('insertUnorderedList')" class="h-7 w-7 rounded text-slate-700 hover:bg-slate-200">•</button>
-                            <button type="button" title="Numbered list" @click="exec('insertOrderedList')" class="h-7 w-7 rounded text-xs text-slate-700 hover:bg-slate-200">1.</button>
-                            <button type="button" title="Insert link" @click="insertLink" class="h-7 w-7 rounded text-slate-700 hover:bg-slate-200">🔗</button>
-                            <button type="button" title="Remove link" @click="exec('unlink')" class="h-7 px-1.5 rounded text-xs text-slate-700 hover:bg-slate-200">unlink</button>
-                            <span class="mx-1 h-5 w-px bg-slate-300"></span>
-                            <button type="button" title="Clear formatting" @click="exec('removeFormat')" class="h-7 px-1.5 rounded text-xs text-slate-700 hover:bg-slate-200">clear</button>
-                        </div>
-                        <div
-                            ref="richEl"
-                            contenteditable="true"
-                            @input="onRichInput"
-                            class="prose prose-sm min-h-[12rem] max-w-none rounded-b-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
-                        ></div>
-                    </div>
+                    <RichTextEditor v-show="editorMode === 'rich'" v-model="form.body" class="mt-1" />
 
                     <!-- Raw (HTML source) editor -->
                     <textarea
