@@ -181,5 +181,6 @@ Route::middleware('role:'.Role::MINISTRY_ADMIN.','.Role::SUPER_ADMIN)->group(fun
     Route::patch('/admin/email-templates/toggle', [EmailTemplateController::class, 'toggle'])->name('admin.email-templates.toggle');
     Route::patch('/admin/email-templates/settings', [EmailTemplateController::class, 'settings'])->name('admin.email-templates.settings');
     Route::put('/admin/email-templates/{id}', [EmailTemplateController::class, 'update'])->name('admin.email-templates.update');
+    Route::post('/admin/email-templates/{id}/test', [EmailTemplateController::class, 'sendTest'])->name('admin.email-templates.test');
 });
 });

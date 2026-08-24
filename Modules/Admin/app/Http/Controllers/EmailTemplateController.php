@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
+use Modules\Admin\Services\EmailNotificationService;
 
 /**
  * Ministry (IDIR) management of the notification email templates migrated from
@@ -55,6 +56,27 @@ class EmailTemplateController extends Controller
         ]);
 
         return redirect('/admin/email-templates')->with('success', 'Email template updated.');
+    }
+
+    public function sendTest(Request $request, int $id, EmailNotificationService $service): RedirectResponse
+    {
+        abort_unless(Schema::hasTable('email_templates'), 404);
+
+        $template = DB::table('email_templates')->where('id', $id)->first();
+        abort_if($template === null, 404);
+
+        $data = $request->validate([
+            'email' => ['required', 'email', 'max:255'],
+        ]);
+
+        $sent = $service->sendTest((string) $template->key, $data['email']);
+
+        return redirect('/admin/email-templates')->with(
+            $sent ? 'success' : 'error',
+            $sent
+                ? 'Test email sent to '.$data['email'].'.'
+                : 'Could not send test email to '.$data['email'].'. Check the mail configuration and try again.'
+        );
     }
 
     public function toggle(Request $request): RedirectResponse

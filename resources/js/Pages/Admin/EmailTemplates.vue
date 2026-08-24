@@ -1,6 +1,6 @@
 <script setup>
 import { Head, router, useForm, usePage } from '@inertiajs/vue3'
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 
 const props = defineProps({
     templates: { type: Array, default: () => [] },
@@ -38,6 +38,48 @@ const form = useForm({
     is_active: true,
 })
 
+// Body editor mode — "rich" (WYSIWYG) or "raw" (HTML source).
+const editorMode = ref('rich')
+const richEl = ref(null)
+
+// Push the current form.body into the contenteditable element (after the DOM
+// for the edit form has rendered / the mode has switched).
+const syncRichFromForm = () => {
+    nextTick(() => {
+        if (richEl.value && richEl.value.innerHTML !== form.body) {
+            richEl.value.innerHTML = form.body || ''
+        }
+    })
+}
+
+const onRichInput = () => {
+    if (richEl.value) {
+        form.body = richEl.value.innerHTML
+    }
+}
+
+const setEditorMode = (mode) => {
+    if (mode === editorMode.value) {
+        return
+    }
+    editorMode.value = mode
+    if (mode === 'rich') {
+        syncRichFromForm()
+    }
+}
+
+const exec = (command, value = null) => {
+    document.execCommand(command, false, value)
+    onRichInput()
+}
+
+const insertLink = () => {
+    const url = window.prompt('Link URL', 'https://')
+    if (url) {
+        exec('createLink', url)
+    }
+}
+
 const startEdit = (t) => {
     editingId.value = t.id
     form.clearErrors()
@@ -45,6 +87,8 @@ const startEdit = (t) => {
     form.body = t.body || ''
     form.recipients = t.recipients || ''
     form.is_active = !!t.is_active
+    editorMode.value = 'rich'
+    syncRichFromForm()
 }
 
 const cancelEdit = () => {
@@ -57,6 +101,34 @@ const save = (t) => {
     form.put(`/admin/email-templates/${t.id}`, {
         preserveScroll: true,
         onSuccess: () => { editingId.value = null },
+    })
+}
+
+// Send-test dialog state.
+const testTemplate = ref(null)
+const testForm = useForm({
+    email: props.testingEmail || '',
+})
+
+const openTest = (t) => {
+    testForm.clearErrors()
+    testForm.email = props.testingEmail || ''
+    testTemplate.value = t
+}
+
+const closeTest = () => {
+    testTemplate.value = null
+    testForm.reset()
+    testForm.clearErrors()
+}
+
+const sendTest = () => {
+    if (!testTemplate.value) {
+        return
+    }
+    testForm.post(`/admin/email-templates/${testTemplate.value.id}/test`, {
+        preserveScroll: true,
+        onSuccess: () => closeTest(),
     })
 }
 
@@ -160,12 +232,18 @@ const placeholder = (name) => `{{${name}}}`
                     </div>
                     <p v-if="t.description" class="mt-1 max-w-3xl text-xs text-slate-500">{{ t.description }}</p>
                 </div>
-                <button
-                    v-if="editingId !== t.id"
-                    type="button"
-                    @click="startEdit(t)"
-                    class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >Edit</button>
+                <div v-if="editingId !== t.id" class="flex items-center gap-2">
+                    <button
+                        type="button"
+                        @click="openTest(t)"
+                        class="rounded-md border border-indigo-300 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50"
+                    >Send Test Email</button>
+                    <button
+                        type="button"
+                        @click="startEdit(t)"
+                        class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >Edit</button>
+                </div>
             </div>
 
             <!-- Read-only summary -->
@@ -203,8 +281,54 @@ const placeholder = (name) => `{{${name}}}`
                     <p v-if="form.errors.recipients" class="mt-1 text-xs text-red-600">{{ form.errors.recipients }}</p>
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Body (HTML)</label>
-                    <textarea v-model="form.body" rows="8" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs focus:border-slate-500 focus:outline-none"></textarea>
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Body</label>
+                        <div class="inline-flex overflow-hidden rounded-md border border-slate-300 text-xs">
+                            <button
+                                type="button"
+                                @click="setEditorMode('rich')"
+                                class="px-3 py-1 font-medium"
+                                :class="editorMode === 'rich' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'"
+                            >Rich</button>
+                            <button
+                                type="button"
+                                @click="setEditorMode('raw')"
+                                class="border-l border-slate-300 px-3 py-1 font-medium"
+                                :class="editorMode === 'raw' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'"
+                            >Raw</button>
+                        </div>
+                    </div>
+
+                    <!-- Rich (WYSIWYG) editor -->
+                    <div v-show="editorMode === 'rich'" class="mt-1">
+                        <div class="flex flex-wrap items-center gap-1 rounded-t-md border border-b-0 border-slate-300 bg-slate-50 px-2 py-1">
+                            <button type="button" title="Bold" @click="exec('bold')" class="h-7 w-7 rounded font-bold text-slate-700 hover:bg-slate-200">B</button>
+                            <button type="button" title="Italic" @click="exec('italic')" class="h-7 w-7 rounded italic text-slate-700 hover:bg-slate-200">I</button>
+                            <button type="button" title="Underline" @click="exec('underline')" class="h-7 w-7 rounded text-slate-700 underline hover:bg-slate-200">U</button>
+                            <span class="mx-1 h-5 w-px bg-slate-300"></span>
+                            <button type="button" title="Bulleted list" @click="exec('insertUnorderedList')" class="h-7 w-7 rounded text-slate-700 hover:bg-slate-200">•</button>
+                            <button type="button" title="Numbered list" @click="exec('insertOrderedList')" class="h-7 w-7 rounded text-xs text-slate-700 hover:bg-slate-200">1.</button>
+                            <button type="button" title="Insert link" @click="insertLink" class="h-7 w-7 rounded text-slate-700 hover:bg-slate-200">🔗</button>
+                            <button type="button" title="Remove link" @click="exec('unlink')" class="h-7 px-1.5 rounded text-xs text-slate-700 hover:bg-slate-200">unlink</button>
+                            <span class="mx-1 h-5 w-px bg-slate-300"></span>
+                            <button type="button" title="Clear formatting" @click="exec('removeFormat')" class="h-7 px-1.5 rounded text-xs text-slate-700 hover:bg-slate-200">clear</button>
+                        </div>
+                        <div
+                            ref="richEl"
+                            contenteditable="true"
+                            @input="onRichInput"
+                            class="prose prose-sm min-h-[12rem] max-w-none rounded-b-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
+                        ></div>
+                    </div>
+
+                    <!-- Raw (HTML source) editor -->
+                    <textarea
+                        v-show="editorMode === 'raw'"
+                        v-model="form.body"
+                        rows="8"
+                        class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs focus:border-slate-500 focus:outline-none"
+                    ></textarea>
+
                     <p v-if="form.errors.body" class="mt-1 text-xs text-red-600">{{ form.errors.body }}</p>
                     <p v-if="t.variables" class="mt-1 text-xs text-slate-500">
                         Placeholders:
@@ -224,6 +348,42 @@ const placeholder = (name) => `{{${name}}}`
 
         <div v-if="templates.length === 0" class="rounded-lg border border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
             No email templates found.
+        </div>
+    </div>
+
+    <!-- Send Test Email dialog -->
+    <div
+        v-if="testTemplate"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+        @click.self="closeTest"
+    >
+        <div class="w-full max-w-md overflow-hidden rounded-lg bg-white shadow-xl">
+            <div class="flex items-start justify-between border-b border-slate-200 px-4 py-3">
+                <div>
+                    <h3 class="text-base font-semibold text-slate-800">Send test email</h3>
+                    <p class="mt-0.5 text-xs text-slate-500">{{ testTemplate.name }}</p>
+                </div>
+                <button type="button" @click="closeTest" class="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            <form @submit.prevent="sendTest" class="px-4 py-4">
+                <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Recipient email</label>
+                <input
+                    v-model="testForm.email"
+                    type="email"
+                    placeholder="tester@gov.bc.ca"
+                    class="mt-1 w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-slate-500 focus:outline-none"
+                    autofocus
+                />
+                <p v-if="testForm.errors.email" class="mt-1 text-xs text-red-600">{{ testForm.errors.email }}</p>
+                <p class="mt-2 text-xs text-slate-500">
+                    Sends this template (with its placeholders left as-is) to the address above, regardless of the
+                    master switch. Defaults to the configured testing email when one is set.
+                </p>
+                <div class="mt-4 flex items-center justify-end gap-2">
+                    <button type="button" @click="closeTest" class="rounded-md border border-slate-300 px-4 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+                    <button type="submit" :disabled="testForm.processing" class="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">Send</button>
+                </div>
+            </form>
         </div>
     </div>
 </template>

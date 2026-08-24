@@ -122,6 +122,53 @@ class EmailNotificationService
     }
 
     /**
+     * Force-send a single template to an explicit address so a ministry admin
+     * can preview it from the Email Templates page. Bypasses the master switch
+     * and the template's active flag (it is an on-demand test), but still logs
+     * the attempt to sent_emails. Unresolved {{placeholders}} are left intact so
+     * the reviewer can see which tokens the live email will fill. Never throws.
+     *
+     * @param  array<string, scalar|null>  $vars
+     */
+    public function sendTest(string $key, string $to, array $vars = []): bool
+    {
+        if (! Schema::hasTable('email_templates')) {
+            return false;
+        }
+
+        $template = DB::table('email_templates')->where('key', $key)->first();
+
+        if ($template === null) {
+            return false;
+        }
+
+        $recipient = trim($to);
+
+        if ($recipient === '') {
+            return false;
+        }
+
+        $subject = '[TEST] '.$this->render((string) $template->subject, $vars);
+        $body = $this->render((string) $template->body, $vars);
+
+        try {
+            Mail::html($body, function ($message) use ($recipient, $subject): void {
+                $message->to($recipient)->subject($subject);
+            });
+
+            $this->log($key, $template, $subject, $body, $recipient, null, 'sent', null, []);
+
+            return true;
+        } catch (Throwable $e) {
+            Log::warning('EmailNotificationService: failed to send test "'.$key.'": '.$e->getMessage());
+
+            $this->log($key, $template, $subject, $body, $recipient, null, 'failed', $e->getMessage(), []);
+
+            return false;
+        }
+    }
+
+    /**
      * Persist an audit record of a dispatched (or attempted) email. Never throws
      * — logging must not break the actual send/workflow.
      *
