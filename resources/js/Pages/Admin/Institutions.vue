@@ -71,7 +71,7 @@ function standingClass(s) {
     <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
             <h1 class="text-2xl font-bold text-slate-800">Institutions</h1>
-            <p class="text-sm text-slate-500">{{ filtered.length }} of {{ institutions.length }} institutions · migrated from Dynamics</p>
+            <p class="text-sm text-slate-500">{{ filtered.length }} of {{ institutions.length }} institutions ·</p>
         </div>
         <div class="flex flex-wrap items-center gap-3">
             <label class="flex items-center gap-2 text-sm text-slate-500">EQA Status

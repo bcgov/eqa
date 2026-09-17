@@ -43,7 +43,7 @@ function money(v) {
             <p class="text-sm text-slate-500">
                 <template v-if="applications.total">Showing {{ applications.from }}–{{ applications.to }} of {{ applications.total }} applications</template>
                 <template v-else>No matching applications</template>
-                · migrated from Dynamics
+                ·
             </p>
         </div>
         <input
@@ -65,12 +65,13 @@ function money(v) {
                     <th class="px-3 py-2.5">Approved Date</th>
                     <th class="px-3 py-2.5 text-right">Total Due</th>
                     <th class="px-3 py-2.5">Invoice #</th>
-                    <th class="px-3 py-2.5"></th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
                 <tr v-for="a in rows" :key="a.crm_id" class="hover:bg-slate-50">
-                    <td class="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-600">{{ a.reference }}</td>
+                    <td class="whitespace-nowrap px-3 py-2 font-mono text-xs">
+                        <Link :href="`/admin/applications/${a.crm_id}`" class="text-indigo-600 hover:underline">{{ a.reference }}</Link>
+                    </td>
                     <td class="px-3 py-2">
                         <Link v-if="a.institution_crm_id" :href="`/admin/institutions/${a.institution_crm_id}`" class="text-indigo-600 hover:underline">{{ a.institution_name || '—' }}</Link>
                         <span v-else class="text-slate-800">{{ a.institution_name || '—' }}</span>
@@ -85,12 +86,9 @@ function money(v) {
                         <Link v-if="a.invoice_crm_id" :href="`/admin/invoices/${a.invoice_crm_id}`" class="text-indigo-600 hover:underline">{{ a.invoice_number || '—' }}</Link>
                         <span v-else class="text-slate-500">{{ a.invoice_number || '—' }}</span>
                     </td>
-                    <td class="px-3 py-2">
-                        <Link :href="`/admin/applications/${a.crm_id}`" class="font-medium text-indigo-600 hover:underline">Review →</Link>
-                    </td>
                 </tr>
                 <tr v-if="rows.length === 0">
-                    <td colspan="8" class="px-3 py-8 text-center text-sm text-slate-400">No applications.</td>
+                    <td colspan="7" class="px-3 py-8 text-center text-sm text-slate-400">No applications.</td>
                 </tr>
             </tbody>
         </table>
