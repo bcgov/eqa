@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
+use Modules\Admin\Http\Controllers\ApplicationController;
 use Modules\Admin\Http\Controllers\ApplicationWorkflowController;
 use Modules\Admin\Http\Controllers\EmailTemplateController;
 use Modules\Admin\Http\Controllers\InstitutionController;
@@ -127,43 +128,9 @@ Route::get('/admin/dbas', function () {
     return Inertia::render('Admin/Dbas', ['dbas' => $dbas]);
 })->name('admin.dbas');
 
-Route::get('/admin/applications', function () {
-    $applications = collect();
-    if (Schema::hasTable('applications')) {
-        $query = DB::table('applications as a')->orderByDesc('a.application_date')->limit(1000)->select('a.*');
-        if (Schema::hasTable('invoices')) {
-            $query->selectSub(
-                DB::table('invoices')->select('crm_id')->whereColumn('invoices.application_crm_id', 'a.crm_id')->limit(1),
-                'invoice_crm_id'
-            );
-        }
-        $applications = $query->get();
-    }
+Route::get('/admin/applications', [ApplicationController::class, 'index'])->name('admin.applications');
 
-    return Inertia::render('Admin/Applications', ['applications' => $applications]);
-})->name('admin.applications');
-
-Route::get('/admin/applications/{crmId}', function (string $crmId) {
-    abort_unless(Schema::hasTable('applications'), 404);
-    $application = DB::table('applications')->where('crm_id', $crmId)->first();
-    abort_if($application === null, 404);
-    $invoice = Schema::hasTable('invoices')
-        ? DB::table('invoices')->where('application_crm_id', $crmId)->first()
-        : null;
-
-    // PTIRU Standing is only relevant when the institution's quality assurance is
-    // met through the Private Training designation, so surface its QA Met Through
-    // value to let the review screen hide the PTIRU standing check otherwise.
-    $qaMetThrough = ($application->institution_crm_id && Schema::hasTable('institutions'))
-        ? optional(DB::table('institutions')->where('crm_id', $application->institution_crm_id)->first())->qa_met_through
-        : null;
-
-    return Inertia::render('Admin/ApplicationReview', [
-        'application' => $application,
-        'invoice' => $invoice,
-        'qaMetThrough' => $qaMetThrough,
-    ]);
-})->name('admin.application.review');
+Route::get('/admin/applications/{crmId}', [ApplicationController::class, 'review'])->name('admin.application.review');
 
 Route::post('/admin/applications/{crmId}/advance', [ApplicationWorkflowController::class, 'advance'])->name('admin.application.advance');
 Route::put('/admin/applications/{crmId}', [ApplicationWorkflowController::class, 'update'])->name('admin.application.update');
