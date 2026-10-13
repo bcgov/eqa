@@ -46,7 +46,14 @@ class EmailNotificationService
      */
     public function testingEmail(): string
     {
-        return trim((string) ($this->settings()->testing_email ?? ''));
+        return $this->resolveTestingEmail($this->settings());
+    }
+
+    private function resolveTestingEmail(?object $settings): string
+    {
+        $saved = trim((string) ($settings->testing_email ?? ''));
+
+        return $saved !== '' ? $saved : trim((string) config('mail.testing_address', ''));
     }
 
     /**
@@ -65,7 +72,7 @@ class EmailNotificationService
     {
         $settings = $this->settings();
         $sendingEnabled = (bool) ($settings->sending_enabled ?? false);
-        $testingEmail = trim((string) ($settings->testing_email ?? ''));
+        $testingEmail = $this->resolveTestingEmail($settings);
 
         // Fully off: master switch OFF and no testing address to divert to.
         if (! $sendingEnabled && $testingEmail === '') {

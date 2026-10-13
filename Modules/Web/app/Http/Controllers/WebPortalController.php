@@ -7,6 +7,7 @@ namespace Modules\Web\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\ExpressPayService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
+use Modules\Admin\Services\ApplicationFeeService;
 use Modules\Admin\Services\ProcessNotifier;
 
 /**
@@ -46,8 +48,11 @@ class WebPortalController extends Controller
             ->get();
     }
 
-    /** Workflow stages that mean the institution already has a submitted / in-review application. */
-    private const ACTIVE_STAGES = ['pending_review', 'fees_payment', 'under_review', 'suitability_review'];
+    /** Workflow stages that mean the institution already has an open application. */
+    private const ACTIVE_STAGES = [
+        'draft', 'pending_review', 'fees_payment', 'under_review', 'suitability_review', 'application_approval',
+        'not_approved', 'non_approval_reasons', 'admin_fee', 'appeal_payment', 'appeal_review',
+    ];
 
     private function hasActiveApplication(object $institution): bool
     {
@@ -163,17 +168,35 @@ class WebPortalController extends Controller
         return Inertia::render('Web/Applications', [
             'institution' => $institution,
             'applications' => $this->applicationsFor($institution),
+            'hasActiveApplication' => $institution !== null && $this->hasActiveApplication($institution),
         ]);
     }
 
     public function show(Request $request, string $crmId): Response
     {
-        $application = DB::table('applications')->where('crm_id', $crmId)->first();
-        abort_if($application === null, 404);
+        $institution = $this->institution($request);
+        $application = $this->ownApplication($request, $crmId);
+        $expressPay = app(ExpressPayService::class);
+        $fees = app(ApplicationFeeService::class);
+
+        $invoices = DB::table('invoices')
+            ->where('application_crm_id', $application->crm_id)
+            ->orderBy('invoice_number')
+            ->get()
+            ->map(function (object $invoice) use ($expressPay): object {
+                $invoice->amount_due = $expressPay->amountDue($invoice);
+                $invoice->payable = $expressPay->isPayable($invoice);
+
+                return $invoice;
+            });
 
         return Inertia::render('Web/ViewApplication', [
-            'institution' => $this->institution($request),
+            'institution' => $institution,
             'application' => $application,
+            'invoices' => $invoices,
+            'canPayOnline' => $expressPay->canUserPay($request->user(), $request->session()->has('impersonator_id')),
+            'canEdit' => $application->status === 'Draft',
+            'canAppeal' => $fees->canAppeal($application),
         ]);
     }
 
@@ -571,36 +594,138 @@ class WebPortalController extends Controller
                 ->with('error', 'You already have an application that is submitted or under review. You cannot submit a new one until it is finalized.');
         }
 
-        $data = $request->validate([
-            'total_enrolment' => ['nullable', 'integer', 'min:0'],
-            'intl_students_permit' => ['nullable', 'integer', 'min:0'],
-            'intl_students_other' => ['nullable', 'integer', 'min:0'],
-            'in_person_students' => ['nullable', 'integer', 'min:0'],
-            'enrolment_type' => ['nullable', 'string', 'max:50'],
-        ]);
+        $data = $this->validatedApplication($request);
+        $fees = app(ApplicationFeeService::class);
 
-        $maxNum = (int) DB::table('applications')
-            ->selectRaw("MAX(NULLIF(regexp_replace(reference, '[^0-9]', '', 'g'), '')::bigint) AS m")
-            ->value('m');
-        $reference = 'APP-'.str_pad((string) ($maxNum + 1), 8, '0', STR_PAD_LEFT);
+        $reference = 'APP-'.str_pad((string) $fees->nextNumber('applications', 'reference'), 8, '0', STR_PAD_LEFT);
+        $feeType = app(ProcessNotifier::class)->isReapplication($institution)
+            ? ApplicationFeeService::FEE_APPLICATION_RENEWAL
+            : ApplicationFeeService::FEE_APPLICATION_NEW;
+        $amount = (float) config('eqa.fees.'.$feeType);
+        $crmId = (string) Str::uuid();
 
-        $isReapplication = app(ProcessNotifier::class)->isReapplication($institution);
-
+        // Saved as a Draft: paying the application fee (or submitting for offline payment) submits it.
         DB::table('applications')->insert(array_merge($data, [
-            'crm_id' => (string) Str::uuid(),
+            'crm_id' => $crmId,
             'reference' => $reference,
-            'status' => 'Pending Review',
-            'workflow_stage' => 'pending_review',
+            'status' => 'Draft',
+            'workflow_stage' => 'draft',
             'institution_crm_id' => $institution->crm_id,
             'institution_name' => $institution->name,
             'owner_name' => $institution->business_owner ?? null,
             'application_date' => Carbon::now()->toDateString(),
-            'total_due' => 0,
+            'application_fee' => $amount,
+            'total_due' => $amount,
         ]));
 
-        app(ProcessNotifier::class)->applicationSubmitted($institution, $reference, $isReapplication);
+        $fees->createInvoice(DB::table('applications')->where('crm_id', $crmId)->first(), $feeType, $amount);
 
-        return redirect('/web/applications')->with('success', 'Application '.$reference.' submitted for review.');
+        $label = $feeType === ApplicationFeeService::FEE_APPLICATION_RENEWAL ? 'renewal' : 'new';
+
+        return redirect('/web/applications/'.$crmId)
+            ->with('success', 'Application '.$reference.' saved as a draft. Pay the '.$label.' application fee to submit it.');
+    }
+
+    public function edit(Request $request, string $crmId): Response
+    {
+        $application = $this->ownApplication($request, $crmId);
+        abort_unless($application->status === 'Draft', 403);
+
+        return Inertia::render('Web/NewApplication', [
+            'institution' => $this->institution($request),
+            'application' => $application,
+        ]);
+    }
+
+    public function update(Request $request, string $crmId): RedirectResponse
+    {
+        $application = $this->ownApplication($request, $crmId);
+        abort_unless($application->status === 'Draft', 403);
+
+        DB::table('applications')->where('crm_id', $crmId)->update($this->validatedApplication($request));
+
+        return redirect('/web/applications/'.$crmId)->with('success', 'Application '.$application->reference.' updated.');
+    }
+
+    /** Submit a draft without paying online (non Express Pay payment), or resubmit requested changes. */
+    public function submit(Request $request, string $crmId): RedirectResponse
+    {
+        $application = $this->ownApplication($request, $crmId);
+        abort_unless($application->workflow_stage === 'draft', 403);
+
+        app(ApplicationFeeService::class)->submit($application);
+
+        return redirect('/web/applications/'.$crmId)->with('success', 'Application '.$application->reference.' submitted.');
+    }
+
+    public function appeal(Request $request, string $crmId): RedirectResponse
+    {
+        $application = $this->ownApplication($request, $crmId);
+        $fees = app(ApplicationFeeService::class);
+
+        if (! $fees->canAppeal($application)) {
+            return redirect('/web/applications/'.$crmId)->with('error', 'This decision can no longer be appealed.');
+        }
+
+        $invoice = $fees->openAppeal($application);
+
+        return redirect('/web/applications/'.$crmId)
+            ->with('success', 'Appeal started. Pay the appeal fee (invoice '.$invoice->invoice_number.') to submit it.');
+    }
+
+    private function ownApplication(Request $request, string $crmId): object
+    {
+        $institution = $this->institution($request);
+        abort_if($institution === null, 403);
+
+        $application = DB::table('applications')
+            ->where('crm_id', $crmId)
+            ->where('institution_crm_id', $institution->crm_id)
+            ->first();
+        abort_if($application === null, 404);
+
+        return $application;
+    }
+
+    /** @return array<string, mixed> */
+    private function validatedApplication(Request $request): array
+    {
+        $flags = [
+            'sabc_designation',
+            'program_associate_degree', 'program_university_transfer', 'program_bachelors_degree', 'program_graduate_degree',
+            'program_career_training', 'program_language_training', 'program_theological_education', 'program_trades_apprenticeship',
+            'media_pamphlet', 'media_website', 'media_brochure', 'media_poster', 'media_banner', 'media_billboard',
+        ];
+        $affirmations = [
+            'affirm_policy_manual', 'affirm_website_compliance', 'affirm_written_permission',
+            'affirm_branding_guide', 'affirm_understands_comply', 'affirm_authorized',
+        ];
+
+        $rules = [
+            'total_enrolment' => ['nullable', 'integer', 'min:0'],
+            'intl_students_permit' => ['nullable', 'integer', 'min:0'],
+            'intl_students_other' => ['nullable', 'integer', 'min:0'],
+            'in_person_students' => ['nullable', 'integer', 'min:0'],
+            'online_students' => ['nullable', 'integer', 'min:0'],
+            'enrolment_type' => ['nullable', 'string', 'max:50'],
+            'brand_usage_plan' => ['nullable', 'string', 'max:2000'],
+            'other_logos_trademarks' => ['nullable', 'string', 'max:2000'],
+            'affiliates_partners' => ['nullable', 'string', 'max:2000'],
+            'representative_signature' => ['required', 'string', 'max:255'],
+        ];
+        foreach ($flags as $flag) {
+            $rules[$flag] = ['boolean'];
+        }
+        foreach ($affirmations as $affirmation) {
+            $rules[$affirmation] = ['accepted'];
+        }
+
+        $data = $request->validate($rules);
+        foreach (array_merge($flags, $affirmations) as $field) {
+            $data[$field] = $request->boolean($field);
+        }
+
+        return $data;
     }
 
     /** Human label for the acting institution portal user, for change notifications. */

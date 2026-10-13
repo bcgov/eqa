@@ -11,6 +11,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Modules\Admin\Services\ApplicationFeeService;
 use Modules\Admin\Services\DesignationService;
 use Modules\Admin\Services\ProcessNotifier;
 
@@ -32,11 +33,15 @@ class ApplicationWorkflowController extends Controller
             'eligible' => 'application_approval',
             'ineligible' => 'not_approved',
             'refer_suitability' => 'suitability_review',
+            'request_changes' => 'draft',
         ],
-        'application_approval' => ['approve' => 'end'],
+        'application_approval' => ['approve' => 'admin_fee'],
         'not_approved' => ['record_reasons' => 'non_approval_reasons'],
         'non_approval_reasons' => ['finalize' => 'end'],
-        'suitability_review' => ['pass' => 'end', 'fail' => 'end'],
+        'suitability_review' => ['pass' => 'admin_fee', 'fail' => 'end'],
+        'admin_fee' => ['confirm_admin_fee' => 'end'],
+        'appeal_payment' => ['confirm_appeal_fee' => 'appeal_review'],
+        'appeal_review' => ['appeal_overturn' => 'application_approval', 'appeal_uphold' => 'end'],
     ];
 
     /**
@@ -134,15 +139,66 @@ class ApplicationWorkflowController extends Controller
             return back()->with('error', 'You have to complete the required steps before you can advance: '.implode(', ', $missing).'.');
         }
 
+        $fees = app(ApplicationFeeService::class);
+        $advanced = 'Application advanced to '.str_replace('_', ' ', $next).'.';
+
+        switch ($action) {
+            case 'submit':
+                $fees->submit($application);
+
+                return back()->with('success', 'Application submitted.');
+            case 'request_changes':
+                $data = $request->validate(['changes' => ['required', 'string', 'max:2000']]);
+                $fees->requestChanges($application, $data['changes']);
+
+                return back()->with('success', 'Application reopened for changes; the institution has been notified.');
+            case 'approve':
+            case 'pass':
+                $data = $request->validate([
+                    'admin_fee' => ['nullable', 'numeric', 'min:0.01'],
+                    'compliance_order' => ['boolean'],
+                    'compliance_order_notes' => ['nullable', 'string', 'max:2000', 'required_if_accepted:compliance_order'],
+                ]);
+                $invoice = $fees->approve(
+                    $application,
+                    (float) ($data['admin_fee'] ?? config('eqa.fees.admin_variable')),
+                    (bool) ($data['compliance_order'] ?? false),
+                    (string) ($data['compliance_order_notes'] ?? ''),
+                );
+
+                return back()->with('success', 'Application approved. Admin variable fee invoice '.$invoice->invoice_number.' sent to the institution.');
+            case 'confirm_admin_fee':
+            case 'confirm_appeal_fee':
+                $invoice = $fees->invoiceFor($crmId, $action === 'confirm_admin_fee' ? ApplicationFeeService::FEE_ADMIN_VARIABLE : ApplicationFeeService::FEE_APPEAL);
+                if ($invoice === null) {
+                    return back()->with('error', 'No invoice found for this fee.');
+                }
+                $fees->recordManualPayment($invoice, $request->string('payment_method')->toString() ?: 'Manual');
+
+                return back()->with('success', 'Payment confirmed. '.$advanced);
+            case 'appeal_overturn':
+                $fees->overturnAppeal($application);
+
+                return back()->with('success', 'Appeal overturned. Record the approval decision.');
+            case 'appeal_uphold':
+                $fees->upholdAppeal($application);
+
+                return back()->with('success', 'Appeal upheld. The application is Declined.');
+        }
+
         $today = Carbon::now()->toDateString();
         $updates = ['workflow_stage' => $next];
 
         switch ($action) {
             case 'record_payment':
-                $this->ensureInvoice($application);
-                break;
-            case 'submit':
-                $updates['status'] = 'Pending Review';
+                $feeInvoice = $fees->invoiceFor($crmId, ApplicationFeeService::APPLICATION_FEES);
+                if ($feeInvoice === null) {
+                    // Applications submitted before the online fee existed: legacy CRM financial summary.
+                    $this->ensureInvoice($application);
+                } else {
+                    $fees->recordManualPayment($feeInvoice, $request->string('payment_method')->toString() ?: 'Manual');
+                    $updates['fees_payment_received'] = true;
+                }
                 break;
             case 'begin_review':
                 $updates['status'] = 'Under Review';
@@ -165,15 +221,6 @@ class ApplicationWorkflowController extends Controller
                 $updates['eligibility'] = 'Suitability Review Needed';
                 $updates['suitability_review_date'] = $today;
                 break;
-            case 'approve':
-            case 'pass':
-                $updates['status'] = 'Approved';
-                $updates['designation_decision'] = true;
-                $updates['approved_date'] = $today;
-                if (empty($application->designation_expiry)) {
-                    $updates['designation_expiry'] = Carbon::now()->addYear()->toDateString();
-                }
-                break;
             case 'record_reasons':
                 $updates['non_approval_reasons'] = (string) $request->string('reasons');
                 break;
@@ -182,20 +229,17 @@ class ApplicationWorkflowController extends Controller
                 $updates['status'] = 'Not Approved';
                 $updates['designation_decision'] = false;
                 $updates['not_approved_date'] = $today;
+                $updates['appeal_deadline'] = Carbon::now('America/Vancouver')->addDays((int) config('eqa.deadlines.appeal_days', 30))->toDateString();
                 break;
         }
 
-        DB::transaction(function () use ($crmId, $updates, $action, $application, $today): void {
+        DB::transaction(function () use ($crmId, $updates, $action, $application): void {
             DB::table('applications')->where('crm_id', $crmId)->update($updates);
 
-            // The designation decision cascades onto the institution's Designated
-            // status (EQA Status) — the tight coupling migrated from the CRM BPF.
-            $designation = app(DesignationService::class);
-            if (in_array($action, ['approve', 'pass'], true)) {
-                $expiry = $updates['designation_expiry'] ?? $application->designation_expiry;
-                $designation->onApplicationApproved($application, $today, $expiry);
-            } elseif (in_array($action, ['finalize', 'fail'], true)) {
-                $designation->onApplicationNotApproved($application);
+            // Approval designates once the admin variable fee is paid (ApplicationFeeService);
+            // a decline cascades onto the institution's EQA Status immediately.
+            if (in_array($action, ['finalize', 'fail'], true)) {
+                app(DesignationService::class)->onApplicationNotApproved($application);
             }
         });
 
@@ -259,10 +303,7 @@ class ApplicationWorkflowController extends Controller
             return;
         }
 
-        $maxNum = (int) DB::table('invoices')
-            ->selectRaw("MAX(NULLIF(regexp_replace(invoice_number, '[^0-9]', '', 'g'), '')::bigint) AS m")
-            ->value('m');
-        $number = 'INV-'.str_pad((string) ($maxNum + 1), 8, '0', STR_PAD_LEFT);
+        $number = 'INV-'.str_pad((string) app(ApplicationFeeService::class)->nextNumber('invoices', 'invoice_number'), 8, '0', STR_PAD_LEFT);
 
         $amount = (float) ($application->total_due ?? 0);
         if ($amount <= 0) {

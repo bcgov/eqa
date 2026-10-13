@@ -15,3 +15,14 @@ Schedule::command('eqa:send-notifications')
     ->dailyAt('07:00')
     ->timezone('America/Vancouver')
     ->withoutOverlapping();
+
+// Settle BC Express Pay payments whose payer never came back to the receipt page.
+Schedule::command('eqa:reconcile-payments')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping();
+
+// Expire applications past their admin fee / change request / appeal fee deadline.
+Schedule::command('eqa:enforce-deadlines')
+    ->dailyAt('01:00')
+    ->timezone('America/Vancouver')
+    ->withoutOverlapping();

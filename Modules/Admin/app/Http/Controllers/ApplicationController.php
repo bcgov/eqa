@@ -7,6 +7,7 @@ namespace Modules\Admin\Http\Controllers;
 use App\Http\Controllers\Controller;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 use Modules\Admin\Models\Application;
@@ -17,9 +18,21 @@ use Modules\Admin\Models\Application;
  */
 class ApplicationController extends Controller
 {
+    /** Sortable columns: request key => applications column. */
+    private const SORTS = [
+        'reference' => 'reference',
+        'institution' => 'institution_name',
+        'status' => 'status',
+        'application_date' => 'application_date',
+        'approved_date' => 'approved_date',
+    ];
+
     public function index(Request $request): Response
     {
         $search = trim((string) $request->string('search'));
+        $sort = array_key_exists((string) $request->string('sort'), self::SORTS) ? (string) $request->string('sort') : 'application_date';
+        $direction = $request->string('direction')->toString() === 'asc' ? 'asc' : 'desc';
+        $column = self::SORTS[$sort];
 
         $applications = Application::query()
             ->with('invoice:crm_id,application_crm_id')
@@ -31,7 +44,10 @@ class ApplicationController extends Controller
                         ->orWhereRaw('lower(status) like ?', [$like]);
                 });
             })
-            ->orderByDesc('application_date')
+            // Blanks last in either direction.
+            ->orderByRaw("{$column} is null")
+            ->orderBy($column, $direction)
+            ->orderBy('crm_id')
             ->paginate(25)
             ->withQueryString()
             ->through(function (Application $application): Application {
@@ -43,7 +59,7 @@ class ApplicationController extends Controller
 
         return Inertia::render('Admin/Applications', [
             'applications' => $applications,
-            'filters' => ['search' => $search],
+            'filters' => ['search' => $search, 'sort' => $sort, 'direction' => $direction],
         ]);
     }
 
@@ -60,6 +76,8 @@ class ApplicationController extends Controller
         return Inertia::render('Admin/ApplicationReview', [
             'application' => $application->makeHidden(['invoice', 'institution']),
             'invoice' => $application->invoice,
+            'invoices' => DB::table('invoices')->where('application_crm_id', $crmId)->orderBy('invoice_number')->get(),
+            'adminFeeDefault' => (float) config('eqa.fees.admin_variable'),
             'qaMetThrough' => $qaMetThrough,
         ]);
     }

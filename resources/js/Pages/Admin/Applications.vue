@@ -1,26 +1,33 @@
 <script setup>
 import { Head, Link, router } from '@inertiajs/vue3'
 import { ref, computed, watch } from 'vue'
+import SortHeader from '../../Components/SortHeader.vue'
 
 const props = defineProps({
     applications: { type: Object, default: () => ({ data: [], links: [], from: 0, to: 0, total: 0 }) },
-    filters: { type: Object, default: () => ({ search: '' }) },
+    filters: { type: Object, default: () => ({ search: '', sort: 'application_date', direction: 'desc' }) },
 })
 
 const rows = computed(() => props.applications.data || [])
 const search = ref(props.filters.search || '')
 
 let debounce = null
-watch(search, (value) => {
+function reload(params) {
+    router.get('/admin/applications', {
+        search: search.value || undefined,
+        sort: props.filters.sort,
+        direction: props.filters.direction,
+        ...params,
+    }, { preserveState: true, preserveScroll: true, replace: true })
+}
+watch(search, () => {
     clearTimeout(debounce)
-    debounce = setTimeout(() => {
-        router.get('/admin/applications', { search: value || undefined }, {
-            preserveState: true,
-            preserveScroll: true,
-            replace: true,
-        })
-    }, 300)
+    debounce = setTimeout(() => reload({}), 300)
 })
+function sortBy(column) {
+    const direction = props.filters.sort === column && props.filters.direction === 'asc' ? 'desc' : 'asc'
+    reload({ sort: column, direction })
+}
 
 function statusClass(s) {
     if (s === 'Approved') return 'bg-green-100 text-green-700'
@@ -58,11 +65,11 @@ function money(v) {
         <table class="min-w-full divide-y divide-slate-200 text-sm">
             <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                    <th class="px-3 py-2.5">Reference</th>
-                    <th class="px-3 py-2.5">Institution</th>
-                    <th class="px-3 py-2.5">Status</th>
-                    <th class="px-3 py-2.5">Application Date</th>
-                    <th class="px-3 py-2.5">Approved Date</th>
+                    <th class="px-3 py-2.5"><SortHeader label="Reference" column="reference" :sort="filters.sort" :direction="filters.direction" @sort="sortBy" /></th>
+                    <th class="px-3 py-2.5"><SortHeader label="Institution" column="institution" :sort="filters.sort" :direction="filters.direction" @sort="sortBy" /></th>
+                    <th class="px-3 py-2.5"><SortHeader label="Status" column="status" :sort="filters.sort" :direction="filters.direction" @sort="sortBy" /></th>
+                    <th class="px-3 py-2.5"><SortHeader label="Application Date" column="application_date" :sort="filters.sort" :direction="filters.direction" @sort="sortBy" /></th>
+                    <th class="px-3 py-2.5"><SortHeader label="Approved Date" column="approved_date" :sort="filters.sort" :direction="filters.direction" @sort="sortBy" /></th>
                     <th class="px-3 py-2.5 text-right">Total Due</th>
                     <th class="px-3 py-2.5">Invoice #</th>
                 </tr>

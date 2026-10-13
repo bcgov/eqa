@@ -221,6 +221,56 @@ class ProcessNotifier
     }
 
     // ---------------------------------------------------------------------
+    // Payment / appeal workflow (flowchart DRAFT V1.1).
+    // ---------------------------------------------------------------------
+
+    /** "Send email to Inst. for missing information" when an application is reopened as Draft. */
+    public function changesRequested(object $institution, object $application, string $changes, string $dueDate): void
+    {
+        $contact = $this->contact($institution);
+        $this->emails->send('application_changes_requested', [
+            'contact_name' => $contact['name'] !== '' ? $contact['name'] : 'Applicant',
+            'institution_name' => (string) ($institution->name ?? ''),
+            'application_reference' => (string) ($application->reference ?? ''),
+            'changes_requested' => $changes,
+            'changes_due_date' => $dueDate,
+        ], $contact['email'] ?: null, ['institution_crm_id' => $institution->crm_id ?? null]);
+    }
+
+    /** Approval decision with the admin variable fee invoice (designation follows payment). */
+    public function approvedFeeDue(object $institution, object $application, object $invoice, bool $complianceOrder, string $complianceNotes): void
+    {
+        $contact = $this->contact($institution);
+        $this->emails->send('application_approved_fee_due', [
+            'contact_name' => $contact['name'] !== '' ? $contact['name'] : 'Applicant',
+            'institution_name' => (string) ($institution->name ?? ''),
+            'application_reference' => (string) ($application->reference ?? ''),
+            'approved_date' => (string) ($application->approved_date ?? ''),
+            'compliance_order' => $complianceOrder
+                ? 'This approval is issued under a compliance order: '.($complianceNotes !== '' ? $complianceNotes : 'see the EQA portal for details.')
+                : '',
+            'invoice_number' => (string) ($invoice->invoice_number ?? ''),
+            'admin_fee' => '$'.number_format((float) ($invoice->total_charges ?? 0), 2),
+            'due_date' => (string) ($invoice->due_date ?? ''),
+        ], $contact['email'] ?: null, ['institution_crm_id' => $institution->crm_id ?? null]);
+    }
+
+    /** "Send appeal application confirmation and payment receipt email". */
+    public function appealSubmitted(object $institution, object $application, object $invoice): void
+    {
+        $contact = $this->contact($institution);
+        $this->emails->send('appeal_submission', [
+            'contact_name' => $contact['name'] !== '' ? $contact['name'] : 'Applicant',
+            'institution_name' => (string) ($institution->name ?? ''),
+            'application_reference' => (string) ($application->reference ?? ''),
+            'invoice_number' => (string) ($invoice->invoice_number ?? ''),
+            'amount_paid' => '$'.number_format((float) ($invoice->payment_amount ?? $invoice->total_charges ?? 0), 2),
+            'transaction_reference' => (string) ($invoice->transaction_reference ?? ''),
+            'appeal_date' => (string) ($application->appeal_date ?? ''),
+        ], $contact['email'] ?: null, ['institution_crm_id' => $institution->crm_id ?? null]);
+    }
+
+    // ---------------------------------------------------------------------
     // Portal user creation — "Send Authorization Email" (welcome) + "New Portal
     // Administrator" notification.
     // ---------------------------------------------------------------------
@@ -347,7 +397,7 @@ class ProcessNotifier
                 ->whereNotNull('email')
                 ->where('email', '<>', '')
                 ->orderByRaw('CASE WHEN web_user_active THEN 0 ELSE 1 END')
-                ->orderByRaw("CASE WHEN COALESCE(role, '') ILIKE '%admin%' THEN 0 ELSE 1 END")
+                ->orderByRaw("CASE WHEN LOWER(COALESCE(role, '')) LIKE '%admin%' THEN 0 ELSE 1 END")
                 ->first();
 
             if ($user !== null) {

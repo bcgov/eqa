@@ -47,4 +47,15 @@ return [
         'token_endpoint' => env('PDEX_TOKEN_ENDPOINT'),
     ],
 
+    // BC Express Pay (Worldline) through the Payment Card Industry Redirect (PCIR).
+    // URLs default to the PCIR test gateway; prod sets them in Vault.
+    'expresspay' => [
+        'enabled' => env('EXPRESS_PAY_ENABLED'),
+        'merchant_id' => env('EXPRESS_PAY_MERCHANT_ID'),
+        'hash_key' => env('EXPRESS_PAY_HASH_KEY'),
+        'payment_url' => env('EXPRESS_PAY_PAYMENT_URL'),
+        'query_url' => env('EXPRESS_PAY_QUERY_URL'),
+        'hash_expiry_minutes' => (int) env('EXPRESS_PAY_HASH_EXPIRY_MINUTES'),
+    ],
+
 ];
