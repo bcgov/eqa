@@ -5,19 +5,15 @@ import { computed } from 'vue'
 defineProps({
     institution: { type: Object, default: null },
     applications: { type: Array, default: () => [] },
+    hasActiveApplication: { type: Boolean, default: false },
 })
 
 const flash = computed(() => usePage().props.flash || {})
 
-const activeStatuses = ['Pending Review', 'Under Review', 'Suitability Review']
-const hasActiveApplication = computed(() =>
-    ((usePage().props.applications) || []).some((a) => activeStatuses.includes(a.status))
-)
-
 function statusClass(s) {
-    if (s === 'Approved') return 'bg-green-100 text-green-700'
-    if (s === 'Not Approved') return 'bg-red-100 text-red-700'
-    if (s === 'Under Review' || s === 'Suitability Review') return 'bg-amber-100 text-amber-700'
+    if (s && s.startsWith('Approved')) return 'bg-green-100 text-green-700'
+    if (['Not Approved', 'Declined', 'Expired'].includes(s)) return 'bg-red-100 text-red-700'
+    if (['Under Review', 'Suitability Review', 'Pending Appeal'].includes(s)) return 'bg-amber-100 text-amber-700'
     if (s === 'Pending Review') return 'bg-blue-100 text-blue-700'
     return 'bg-slate-100 text-slate-500'
 }
@@ -34,7 +30,7 @@ function statusClass(s) {
             <span v-if="institution" class="text-base font-normal text-slate-500">for {{ institution.name }}</span>
         </h1>
         <Link v-if="!hasActiveApplication" href="/web/applications/new" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Submit New Application</Link>
-        <span v-else class="cursor-not-allowed rounded-md bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-400" title="You already have an application that is submitted or under review.">Submit New Application</span>
+        <span v-else class="cursor-not-allowed rounded-md bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-400" title="You already have an open application.">Submit New Application</span>
     </div>
 
     <div class="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">

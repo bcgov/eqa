@@ -18,6 +18,7 @@ function stopImpersonating() {
 const institutionNav = [
     { label: 'Home', href: '/web' },
     { label: 'Applications', href: '/web/applications' },
+    { label: 'Invoices', href: '/web/invoices' },
     { label: 'Institution', href: '/web/institution' },
     { label: 'Campuses', href: '/web/campuses' },
     { label: 'DBAs', href: '/web/dbas' },

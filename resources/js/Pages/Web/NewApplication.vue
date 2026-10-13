@@ -4,6 +4,7 @@ import InfoTooltip from '../../Components/InfoTooltip.vue'
 
 const props = defineProps({
     institution: { type: Object, default: null },
+    application: { type: Object, default: null },
 })
 
 const inputClass = 'mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none'
@@ -47,6 +48,17 @@ const form = useForm({
     representative_signature: '',
 })
 
+// Editing a draft: start from the saved values.
+if (props.application) {
+    for (const key of Object.keys(form.data())) {
+        const value = props.application[key]
+        if (value !== null && value !== undefined) {
+            form[key] = typeof form[key] === 'boolean' ? (value === true || value === 1 || value === '1' || value === 't') : value
+        }
+    }
+    form.defaults()
+}
+
 const educationTypes = [
     ['program_associate_degree', 'Associate Degree'],
     ['program_university_transfer', 'University Transfer'],
@@ -77,19 +89,24 @@ const affirmations = [
 ]
 
 function submit() {
-    form.post('/web/applications')
+    if (props.application) {
+        form.put(`/web/applications/${props.application.crm_id}`)
+    } else {
+        form.post('/web/applications')
+    }
 }
 </script>
 
 <template>
-    <Head title="New Application" />
+    <Head :title="application ? 'Edit Application' : 'New Application'" />
 
     <div class="mx-auto max-w-3xl">
         <div class="mb-4">
-            <Link href="/web/applications" class="text-sm text-indigo-600 hover:underline">← Applications</Link>
+            <Link :href="application ? `/web/applications/${application.crm_id}` : '/web/applications'" class="text-sm text-indigo-600 hover:underline">← {{ application ? application.reference : 'Applications' }}</Link>
         </div>
 
-        <h1 class="text-2xl font-bold text-slate-800">Submit New EQA Application</h1>
+        <h1 class="text-2xl font-bold text-slate-800">{{ application ? 'Edit EQA Application' : 'New EQA Application' }}</h1>
+        <p v-if="!application" class="mt-1 text-sm text-slate-500">The application is saved as a draft; it is submitted once the application fee is paid.</p>
         <p v-if="institution" class="mt-1 text-sm text-slate-500">for {{ institution.name }} <span class="font-mono text-slate-400">{{ institution.institution_number }}</span></p>
 
         <form @submit.prevent="submit" class="mt-6 space-y-6">
@@ -188,7 +205,7 @@ function submit() {
             </section>
 
             <div class="flex gap-2">
-                <button type="submit" :disabled="form.processing" class="rounded-md bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">Submit Application</button>
+                <button type="submit" :disabled="form.processing" class="rounded-md bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">{{ application ? 'Save Changes' : 'Save and Continue to Payment' }}</button>
                 <Link href="/web/applications" class="rounded-md border border-slate-300 px-5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</Link>
             </div>
         </form>

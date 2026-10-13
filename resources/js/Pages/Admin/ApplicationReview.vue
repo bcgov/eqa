@@ -5,6 +5,8 @@ import { ref, computed } from 'vue'
 const props = defineProps({
     application: { type: Object, default: () => ({}) },
     invoice: { type: Object, default: null },
+    invoices: { type: Array, default: () => [] },
+    adminFeeDefault: { type: Number, default: 0 },
     qaMetThrough: { type: String, default: null },
 })
 
@@ -24,23 +26,34 @@ const stage = computed(() => props.application.workflow_stage || 'draft')
 
 const stageIndex = {
     draft: 0, pending_review: 1, fees_payment: 2, under_review: 3,
-    application_approval: 4, not_approved: 4, non_approval_reasons: 4, suitability_review: 4, end: 5,
+    application_approval: 4, not_approved: 4, non_approval_reasons: 4, suitability_review: 4,
+    admin_fee: 4, appeal_payment: 4, appeal_review: 4, end: 5,
 }
 const activeIndex = computed(() => stageIndex[stage.value] ?? 0)
 const decisionLabel = computed(() => {
     if (['not_approved', 'non_approval_reasons'].includes(stage.value)) return 'Not Approved'
     if (stage.value === 'suitability_review') return 'Suitability Review'
     if (stage.value === 'application_approval') return 'Application Approval'
-    if (stage.value === 'end') return props.application.status === 'Approved' ? 'Application Approval' : 'Not Approved'
+    if (stage.value === 'admin_fee') return 'Awaiting Admin Fee'
+    if (stage.value === 'appeal_payment') return 'Appeal — Fee Pending'
+    if (stage.value === 'appeal_review') return 'Appeal Review'
+    if (stage.value === 'end') return (props.application.status || '').startsWith('Approved') ? 'Application Approval' : 'Not Approved'
     return 'Decision'
 })
 const steps = computed(() => ['Draft Application', 'Pending Review', 'Fees Payment', 'Under Review', decisionLabel.value, 'End Process'])
 
-const notApproved = computed(() => props.application.status === 'Not Approved')
+const notApproved = computed(() => ['Not Approved', 'Declined', 'Expired'].includes(props.application.status))
 
 const eqaGood = ref(props.application.eqa_good_standing ?? true)
 const ptibGood = ref(props.application.ptib_good_standing ?? true)
 const reasons = ref(props.application.non_approval_reasons || '')
+const changes = ref('')
+const complianceOrder = ref(false)
+const complianceNotes = ref('')
+const adminFee = ref(props.adminFeeDefault || null)
+const approval = () => ({ admin_fee: adminFee.value, compliance_order: complianceOrder.value, compliance_order_notes: complianceNotes.value })
+const feeLabels = { application_new: 'New Application Fee', application_renewal: 'Renewal Application Fee', admin_variable: 'Admin Variable Fee', appeal: 'Appeal Fee' }
+const applicationFeeInvoice = computed(() => props.invoices.find((i) => ['application_new', 'application_renewal'].includes(i.fee_type)) || null)
 const busy = ref(false)
 
 const truthy = (v) => v === true || v === 't' || v === 1 || v === '1'
@@ -124,7 +137,7 @@ function yesNo(v) {
 
 const statusClass = computed(() => {
     if (notApproved.value) return 'bg-red-100 text-red-700'
-    if (props.application.status === 'Approved') return 'bg-green-100 text-green-700'
+    if ((props.application.status || '').startsWith('Approved')) return 'bg-green-100 text-green-700'
     return 'bg-amber-100 text-amber-700'
 })
 const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50'
@@ -163,18 +176,21 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
         </ol>
     </div>
 
-    <div v-if="invoice" class="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-                <h2 class="text-sm font-semibold text-slate-700">Invoice</h2>
-                <p class="mt-1 text-sm text-slate-500">
-                    <Link :href="`/admin/invoices/${invoice.crm_id}`" class="font-mono text-indigo-600 hover:underline">{{ invoice.invoice_number }}</Link>
-                    · {{ money(invoice.total_charges) }} ·
-                    <span class="rounded px-2 py-0.5 text-xs font-medium" :class="invoice.invoice_status === 'Paid' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'">{{ invoice.invoice_status }}</span>
-                </p>
-            </div>
-            <a :href="`/admin/invoices/${invoice.crm_id}/receipt`" class="rounded-md border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100">Download Order Receipt</a>
+    <div v-if="invoices.length" class="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 class="mb-3 text-sm font-semibold text-slate-700">Invoices</h2>
+        <div v-for="inv in invoices" :key="inv.crm_id" class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 py-2 first:border-t-0">
+            <p class="text-sm text-slate-500">
+                <Link :href="`/admin/invoices/${inv.crm_id}`" class="font-mono text-indigo-600 hover:underline">{{ inv.invoice_number }}</Link>
+                · {{ feeLabels[inv.fee_type] || 'Fees' }} · {{ money(inv.total_charges) }}
+                <span v-if="inv.due_date"> · due {{ inv.due_date }}</span> ·
+                <span class="rounded px-2 py-0.5 text-xs font-medium" :class="inv.invoice_status === 'Paid' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'">{{ inv.invoice_status }}</span>
+            </p>
+            <a v-if="inv.invoice_status === 'Paid'" :href="`/admin/invoices/${inv.crm_id}/receipt`" class="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100">Download Order Receipt</a>
         </div>
+    </div>
+
+    <div v-if="application.compliance_order" class="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+        <b>Approved under compliance order:</b> {{ application.compliance_order_notes }}
     </div>
 
     <!-- Action panel: advance the workflow -->
@@ -187,8 +203,19 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
         </div>
 
         <div v-else-if="stage === 'pending_review'">
-            <p class="mb-3 text-sm text-slate-600">Awaiting the application fee before review can begin.</p>
-            <button :disabled="busy" @click="advance('record_payment')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Record Fees Payment →</button>
+            <template v-if="applicationFeeInvoice">
+                <p v-if="applicationFeeInvoice.invoice_status === 'Paid'" class="mb-3 text-sm text-slate-600">
+                    The {{ feeLabels[applicationFeeInvoice.fee_type] }} was paid ({{ applicationFeeInvoice.payment_method || 'Express Pay' }}, ref {{ applicationFeeInvoice.transaction_reference || '—' }}). Confirm the payment to continue.
+                </p>
+                <p v-else class="mb-3 text-sm text-amber-700">
+                    The {{ feeLabels[applicationFeeInvoice.fee_type] }} ({{ money(applicationFeeInvoice.total_charges) }}) has not been paid online. Confirm only if payment was received by another method (e.g. cheque).
+                </p>
+                <button :disabled="busy" @click="advance('record_payment')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Confirm Payment →</button>
+            </template>
+            <template v-else>
+                <p class="mb-3 text-sm text-slate-600">Awaiting the application fee before review can begin.</p>
+                <button :disabled="busy" @click="advance('record_payment')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Record Fees Payment →</button>
+            </template>
         </div>
 
         <div v-else-if="stage === 'fees_payment'">
@@ -207,11 +234,52 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
                 <button :disabled="busy" @click="advance('ineligible', { eqa_good_standing: eqaGood, ptib_good_standing: ptibGood })" :class="[btn, 'bg-red-600 hover:bg-red-700']">Eligibility Not Met</button>
                 <button :disabled="busy" @click="advance('refer_suitability')" :class="[btn, 'bg-amber-500 hover:bg-amber-600']">Refer to Suitability Review</button>
             </div>
+            <div class="mt-5 border-t border-indigo-100 pt-4">
+                <p class="mb-2 text-sm text-slate-600">Application incomplete? Reopen it as a Draft and tell the institution what is missing.</p>
+                <textarea v-model="changes" rows="2" placeholder="Information required from the institution…" class="mb-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"></textarea>
+                <button :disabled="busy || !changes.trim()" @click="advance('request_changes', { changes })" :class="[btn, 'bg-slate-600 hover:bg-slate-700']">Open Application for Changes</button>
+            </div>
         </div>
 
-        <div v-else-if="stage === 'application_approval'">
-            <p class="mb-3 text-sm text-slate-600">Eligibility met. Finalize the approval and set the designation.</p>
-            <button :disabled="busy" @click="advance('approve')" :class="[btn, 'bg-green-600 hover:bg-green-700']">Finalize Approval →</button>
+        <div v-else-if="stage === 'application_approval' || stage === 'suitability_review'">
+            <p class="mb-3 text-sm text-slate-600">
+                {{ stage === 'suitability_review' ? 'Complete the suitability review and record the outcome.' : 'Eligibility met. Record the approval decision.' }}
+                Approving raises the admin variable fee invoice; designation is granted once it is paid.
+            </p>
+            <div class="mb-4 grid gap-3 sm:grid-cols-2">
+                <label class="block text-sm text-slate-700">Admin Variable Fee ($)
+                    <input v-model="adminFee" type="number" min="0.01" step="0.01" :class="inputClass" />
+                </label>
+                <label class="flex items-center gap-2 self-end text-sm text-slate-700"><input type="checkbox" v-model="complianceOrder" class="rounded"> Approve with compliance order</label>
+                <label v-if="complianceOrder" class="block text-sm text-slate-700 sm:col-span-2">Compliance order details
+                    <textarea v-model="complianceNotes" rows="2" :class="inputClass"></textarea>
+                </label>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button v-if="stage === 'application_approval'" :disabled="busy" @click="advance('approve', approval())" :class="[btn, 'bg-green-600 hover:bg-green-700']">Finalize Approval →</button>
+                <template v-else>
+                    <button :disabled="busy" @click="advance('pass', approval())" :class="[btn, 'bg-green-600 hover:bg-green-700']">Suitability Passed — Approve</button>
+                    <button :disabled="busy" @click="advance('fail')" :class="[btn, 'bg-red-600 hover:bg-red-700']">Suitability Failed — Not Approve</button>
+                </template>
+            </div>
+        </div>
+
+        <div v-else-if="stage === 'admin_fee'">
+            <p class="mb-3 text-sm text-slate-600">Approved. Waiting for the institution to pay the admin variable fee. Confirm a payment received outside Express Pay to grant the designation.</p>
+            <button :disabled="busy" @click="advance('confirm_admin_fee')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Confirm Admin Fee Payment →</button>
+        </div>
+
+        <div v-else-if="stage === 'appeal_payment'">
+            <p class="mb-3 text-sm text-slate-600">The institution has started an appeal (Pending Appeal). Waiting for the appeal fee.</p>
+            <button :disabled="busy" @click="advance('confirm_appeal_fee')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Confirm Appeal Fee Payment →</button>
+        </div>
+
+        <div v-else-if="stage === 'appeal_review'">
+            <p class="mb-3 text-sm text-slate-600">Appeal fee paid. Record the appeal decision.</p>
+            <div class="flex flex-wrap gap-2">
+                <button :disabled="busy" @click="advance('appeal_overturn')" :class="[btn, 'bg-green-600 hover:bg-green-700']">Overturned — Go to Approval</button>
+                <button :disabled="busy" @click="advance('appeal_uphold')" :class="[btn, 'bg-red-600 hover:bg-red-700']">Upheld — Declined</button>
+            </div>
         </div>
 
         <div v-else-if="stage === 'not_approved'">
@@ -223,14 +291,6 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
         <div v-else-if="stage === 'non_approval_reasons'">
             <p class="mb-3 text-sm text-slate-600">Finalize the non-approval decision.</p>
             <button :disabled="busy" @click="advance('finalize')" :class="[btn, 'bg-red-600 hover:bg-red-700']">Finalize Non-Approval →</button>
-        </div>
-
-        <div v-else-if="stage === 'suitability_review'">
-            <p class="mb-3 text-sm text-slate-600">Complete the suitability review and record the outcome.</p>
-            <div class="flex flex-wrap gap-2">
-                <button :disabled="busy" @click="advance('pass')" :class="[btn, 'bg-green-600 hover:bg-green-700']">Suitability Passed — Approve</button>
-                <button :disabled="busy" @click="advance('fail')" :class="[btn, 'bg-red-600 hover:bg-red-700']">Suitability Failed — Not Approve</button>
-            </div>
         </div>
 
         <div v-else class="flex items-center gap-2 text-sm font-medium text-slate-600">

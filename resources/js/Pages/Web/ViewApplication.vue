@@ -1,11 +1,29 @@
 <script setup>
-import { Head, Link } from '@inertiajs/vue3'
-import { computed } from 'vue'
+import { Head, Link, router, usePage } from '@inertiajs/vue3'
+import { computed, ref } from 'vue'
 
 const props = defineProps({
     institution: { type: Object, default: null },
     application: { type: Object, default: () => ({}) },
+    invoices: { type: Array, default: () => [] },
+    canPayOnline: { type: Boolean, default: false },
+    canEdit: { type: Boolean, default: false },
+    canAppeal: { type: Boolean, default: false },
 })
+
+const flash = computed(() => usePage().props.flash || {})
+const busy = ref(false)
+const feeLabels = { application_new: 'New Application Fee', application_renewal: 'Renewal Application Fee', admin_variable: 'Administrative Fee', appeal: 'Appeal Fee' }
+const reopened = computed(() => props.canEdit && (props.application.need_additional_details === true || props.application.need_additional_details === 1))
+const unpaidApplicationFee = computed(() => props.invoices.some((i) => ['application_new', 'application_renewal'].includes(i.fee_type) && i.payable))
+
+function post(url) {
+    busy.value = true
+    router.post(url, {}, { preserveScroll: true, onFinish: () => { busy.value = false } })
+}
+const pay = (invoice) => post(`/web/invoices/${invoice.crm_id}/pay`)
+const submitDraft = () => post(`/web/applications/${props.application.crm_id}/submit`)
+const appeal = () => post(`/web/applications/${props.application.crm_id}/appeal`)
 
 const dash = (v) => (v === null || v === undefined || v === '' ? '—' : v)
 
@@ -66,6 +84,48 @@ const affirmations = computed(() => [
         <h1 class="text-2xl font-bold text-slate-800">
             View Application for Reference: <span class="font-mono">{{ application.reference }}</span>
         </h1>
+
+        <div v-if="flash.success" class="mt-4 rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700">{{ flash.success }}</div>
+        <div v-if="flash.error" class="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{{ flash.error }}</div>
+
+        <!-- Next steps: fees, changes requested, appeal -->
+        <section v-if="invoices.length || canEdit || canAppeal || application.compliance_order" class="mt-6 rounded-lg border-2 border-indigo-100 bg-indigo-50/40 p-5">
+            <h2 class="mb-3 text-base font-semibold text-indigo-900">Status: {{ dash(application.status) }}</h2>
+
+            <div v-if="reopened" class="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                <p class="font-semibold">Additional information required by {{ dash(application.changes_due_date) }}:</p>
+                <p class="mt-1 whitespace-pre-line">{{ application.changes_requested }}</p>
+            </div>
+
+            <p v-if="application.compliance_order" class="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                <b>Approved under compliance order:</b> {{ application.compliance_order_notes }}
+            </p>
+
+            <table v-if="invoices.length" class="mb-4 min-w-full divide-y divide-slate-200 text-sm">
+                <thead class="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <tr><th class="py-2">Fee</th><th class="py-2">Invoice #</th><th class="py-2">Due</th><th class="py-2 text-right">Balance</th><th class="py-2">Status</th><th></th></tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    <tr v-for="i in invoices" :key="i.crm_id">
+                        <td class="py-2 text-slate-700">{{ feeLabels[i.fee_type] || 'Fees' }}</td>
+                        <td class="py-2 font-mono text-xs text-slate-600">{{ i.invoice_number }}</td>
+                        <td class="py-2 text-slate-600">{{ dash(i.due_date) }}</td>
+                        <td class="py-2 text-right text-slate-800">{{ currency(i.amount_due) }}</td>
+                        <td class="py-2 text-slate-600">{{ i.invoice_status }}</td>
+                        <td class="py-2 text-right">
+                            <button v-if="i.payable && canPayOnline" type="button" :disabled="busy" @click="pay(i)" class="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">Pay Online</button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="flex flex-wrap gap-2">
+                <Link v-if="canEdit" :href="`/web/applications/${application.crm_id}/edit`" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Edit Application</Link>
+                <button v-if="reopened" type="button" :disabled="busy" @click="submitDraft" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">Resubmit Application</button>
+                <button v-else-if="canEdit && unpaidApplicationFee" type="button" :disabled="busy" @click="submitDraft" class="rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50" title="Submit now and pay the application fee by another method (e.g. cheque).">Submit &amp; Pay by Other Method</button>
+                <button v-if="canAppeal" type="button" :disabled="busy" @click="appeal" class="rounded-md bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50">Appeal Decision (by {{ application.appeal_deadline }})</button>
+            </div>
+        </section>
 
         <!-- Institution Details -->
         <section class="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
