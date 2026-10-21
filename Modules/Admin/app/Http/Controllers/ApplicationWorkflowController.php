@@ -24,9 +24,8 @@ use Modules\Admin\Services\ProcessNotifier;
  */
 class ApplicationWorkflowController extends Controller
 {
-    /** stage => [action => next stage]. */
+    /** stage => [action => next stage]. Drafts have none: only the institution can submit. */
     private const TRANSITIONS = [
-        'draft' => ['submit' => 'pending_review'],
         'pending_review' => ['record_payment' => 'fees_payment'],
         'fees_payment' => ['begin_review' => 'under_review'],
         'under_review' => [
@@ -143,10 +142,6 @@ class ApplicationWorkflowController extends Controller
         $advanced = 'Application advanced to '.str_replace('_', ' ', $next).'.';
 
         switch ($action) {
-            case 'submit':
-                $fees->submit($application);
-
-                return back()->with('success', 'Application submitted.');
             case 'request_changes':
                 $data = $request->validate(['changes' => ['required', 'string', 'max:2000']]);
                 $fees->requestChanges($application, $data['changes']);

@@ -89,17 +89,47 @@ class RedBoxWorkflowTest extends TestCase
         $this->asInstitution()->post('/web/applications', $this->applicationForm())->assertRedirect();
 
         $application = DB::table('applications')->first();
-        $invoice = $this->invoice($application->crm_id, ApplicationFeeService::FEE_APPLICATION_NEW);
         $this->assertSame('Draft', $application->status);
+        $this->assertSame(0, DB::table('invoices')->count(), 'No fee is requested before the application is submitted.');
+
+        $this->asInstitution()->post("/web/applications/{$application->crm_id}/submit")->assertSessionHas('success');
+        $invoice = $this->invoice($application->crm_id, ApplicationFeeService::FEE_APPLICATION_NEW);
         $this->assertEquals(config('eqa.fees.application_new'), $invoice->total_charges);
+        $this->assertNotified('application_submission');
 
         $this->payOnline($invoice);
 
         $application = $this->application($application->crm_id);
         $this->assertSame('Pending Review', $application->status);
         $this->assertSame('pending_review', $application->workflow_stage);
+        $this->assertEquals(1, $application->fees_payment_received);
         $this->assertSame('Paid', $this->invoice($application->crm_id, ApplicationFeeService::FEE_APPLICATION_NEW)->invoice_status);
-        $this->assertNotified('application_submission');
+    }
+
+    public function test_draft_application_fee_cannot_be_paid_before_submission(): void
+    {
+        $this->asInstitution()->post('/web/applications', $this->applicationForm());
+        $application = DB::table('applications')->first();
+        // Drafts saved before this rule already have a fee invoice.
+        $invoice = app(ApplicationFeeService::class)->createInvoice($application, ApplicationFeeService::FEE_APPLICATION_NEW, 1000);
+
+        $this->asInstitution()->post("/web/invoices/{$invoice->crm_id}/pay")->assertSessionHas('error');
+
+        $this->assertSame(0, DB::table('payment_transactions')->count());
+        $this->viewApplication($application->crm_id)
+            ->assertJsonPath('props.awaitingSubmission', true)
+            ->assertJsonPath('props.invoices.0.payable', false);
+    }
+
+    public function test_ministry_cannot_submit_a_draft(): void
+    {
+        $this->asInstitution()->post('/web/applications', $this->applicationForm());
+        $id = DB::table('applications')->value('crm_id');
+
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'submit'])->assertSessionHas('error');
+
+        $this->assertSame('draft', $this->application($id)->workflow_stage);
+        $this->assertSame(0, DB::table('invoices')->count());
     }
 
     public function test_pay_renewal_application_fee(): void
@@ -113,6 +143,7 @@ class RedBoxWorkflowTest extends TestCase
         $this->asInstitution()->post('/web/applications', $this->applicationForm())->assertRedirect();
 
         $application = DB::table('applications')->first();
+        $this->asInstitution()->post("/web/applications/{$application->crm_id}/submit");
         $invoice = $this->invoice($application->crm_id, ApplicationFeeService::FEE_APPLICATION_RENEWAL);
         $this->assertEquals(config('eqa.fees.application_renewal'), $invoice->total_charges);
 
@@ -128,7 +159,7 @@ class RedBoxWorkflowTest extends TestCase
     {
         $this->asInstitution()->post('/web/applications', $this->applicationForm());
         $id = DB::table('applications')->value('crm_id');
-        // Non Express Pay option: submit now, pay by cheque.
+        // Submit first, then pay by cheque.
         $this->asInstitution()->post("/web/applications/{$id}/submit")->assertRedirect();
         DB::table('applications')->where('crm_id', $id)->update(['receipt_confirmation' => true]);
 

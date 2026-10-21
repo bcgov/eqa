@@ -199,8 +199,8 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
         <h2 class="mb-3 text-sm font-semibold text-indigo-900">Next step</h2>
 
         <div v-if="stage === 'draft'">
-            <p class="mb-3 text-sm text-slate-600">The application is a draft. Submit it to begin the review process.</p>
-            <button :disabled="busy" @click="advance('submit')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Submit for Review →</button>
+            <p v-if="application.need_additional_details" class="text-sm text-slate-600">Reopened for changes. Waiting for the institution to resubmit by {{ application.changes_due_date || '—' }}.</p>
+            <p v-else class="text-sm text-slate-600">The application is a draft. The institution must submit it before the review process begins.</p>
         </div>
 
         <div v-else-if="stage === 'pending_review'">

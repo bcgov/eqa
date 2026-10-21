@@ -170,13 +170,27 @@ class ApplicationFeeService
         ]);
 
         $institution = $this->institution($application);
+        $feeInvoice = $this->invoiceFor($application->crm_id, self::APPLICATION_FEES)
+            ?? $this->createApplicationFeeInvoice($application, $institution);
         if ($institution !== null) {
-            $feeInvoice = $this->invoiceFor($application->crm_id, self::APPLICATION_FEES);
-            $isRenewal = $feeInvoice !== null
-                ? $feeInvoice->fee_type === self::FEE_APPLICATION_RENEWAL
-                : $this->notifier->isReapplication($institution);
-            $this->notifier->applicationSubmitted($institution, (string) $application->reference, $isRenewal);
+            $this->notifier->applicationSubmitted($institution, (string) $application->reference, $feeInvoice->fee_type === self::FEE_APPLICATION_RENEWAL);
         }
+    }
+
+    /** A draft that has never been submitted: no fees are requested until it is. */
+    public function awaitingSubmission(object $application): bool
+    {
+        return ($application->workflow_stage ?? null) === 'draft' && ! $this->truthy($application->need_additional_details ?? null);
+    }
+
+    private function createApplicationFeeInvoice(object $application, ?object $institution): object
+    {
+        $feeType = $institution !== null && $this->notifier->isReapplication($institution)
+            ? self::FEE_APPLICATION_RENEWAL
+            : self::FEE_APPLICATION_NEW;
+        $amount = (float) ($application->application_fee ?? 0) ?: (float) config('eqa.fees.'.$feeType);
+
+        return $this->createInvoice($application, $feeType, $amount);
     }
 
     /** Ministry reopens an incomplete application so the institution can supply missing information. */
