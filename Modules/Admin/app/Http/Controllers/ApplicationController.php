@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Modules\Admin\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Services\ExpressPayService;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -76,7 +77,8 @@ class ApplicationController extends Controller
         return Inertia::render('Admin/ApplicationReview', [
             'application' => $application->makeHidden(['invoice', 'institution']),
             'invoice' => $application->invoice,
-            'invoices' => DB::table('invoices')->where('application_crm_id', $crmId)->orderBy('invoice_number')->get(),
+            'invoices' => DB::table('invoices')->where('application_crm_id', $crmId)->orderBy('invoice_number')->get()
+                ->each(fn (object $invoice) => $invoice->payment_under_review = app(ExpressPayService::class)->hasPaymentUnderReview((string) $invoice->crm_id)),
             'adminFeeDefault' => (float) config('eqa.fees.admin_variable'),
             'qaMetThrough' => $qaMetThrough,
         ]);

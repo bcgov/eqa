@@ -184,6 +184,7 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
                 · {{ feeLabels[inv.fee_type] || 'Fees' }} · {{ money(inv.total_charges) }}
                 <span v-if="inv.due_date"> · due {{ inv.due_date }}</span> ·
                 <span class="rounded px-2 py-0.5 text-xs font-medium" :class="inv.invoice_status === 'Paid' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'">{{ inv.invoice_status }}</span>
+                <Link v-if="inv.payment_under_review" :href="`/admin/invoices/${inv.crm_id}`" class="ml-1 rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 hover:underline">Online payment needs review</Link>
             </p>
             <a v-if="inv.invoice_status === 'Paid'" :href="`/admin/invoices/${inv.crm_id}/receipt`" class="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100">Download Order Receipt</a>
         </div>

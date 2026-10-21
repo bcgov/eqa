@@ -56,6 +56,8 @@ return [
         'payment_url' => env('EXPRESS_PAY_PAYMENT_URL'),
         'query_url' => env('EXPRESS_PAY_QUERY_URL'),
         'hash_expiry_minutes' => (int) env('EXPRESS_PAY_HASH_EXPIRY_MINUTES'),
+        // Must differ per environment that shares a merchant account (order numbers must be unique there).
+        'order_number_base' => (int) env('EXPRESS_PAY_ORDER_NUMBER_BASE'),
     ],
 
 ];

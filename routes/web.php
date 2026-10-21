@@ -151,6 +151,8 @@ Route::put('/admin/applications/{crmId}', [ApplicationWorkflowController::class,
 Route::get('/admin/invoices', [InvoiceController::class, 'index'])->name('admin.invoices');
 Route::get('/admin/invoices/{crmId}', [InvoiceController::class, 'show'])->name('admin.invoice.show');
 Route::get('/admin/invoices/{crmId}/receipt', [InvoiceController::class, 'receipt'])->name('admin.invoice.receipt');
+Route::post('/admin/invoices/{crmId}/transactions/{orderNumber}/accept', [InvoiceController::class, 'acceptPayment'])->name('admin.invoice.payment.accept');
+Route::post('/admin/invoices/{crmId}/transactions/{orderNumber}/dismiss', [InvoiceController::class, 'dismissPayment'])->name('admin.invoice.payment.dismiss');
 
 // Ministry email templates (migrated CRM notification emails) + global master
 // switch for email sending (default OFF). Ministry Admins only.

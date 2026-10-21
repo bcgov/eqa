@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Modules\Admin\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Services\ExpressPayService;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -77,6 +79,46 @@ class InvoiceController extends Controller
             : collect();
 
         return Inertia::render('Admin/InvoiceView', ['invoice' => $invoice, 'transactions' => $transactions]);
+    }
+
+    /** Staff found this payment in the Worldline report: apply it to the invoice. */
+    public function acceptPayment(Request $request, ExpressPayService $expressPay, string $crmId, string $orderNumber): RedirectResponse
+    {
+        $data = $request->validate([
+            'trn_id' => ['required', 'regex:/^\d{1,20}$/'],
+            'auth_code' => ['nullable', 'string', 'max:32'],
+        ]);
+
+        $accepted = $expressPay->acceptReviewed($this->reviewTransaction($crmId, $orderNumber), $data['trn_id'], $data['auth_code'] ?? null);
+
+        return back()->with($accepted ? 'success' : 'error', $accepted ? 'Payment accepted and applied to the invoice.' : 'This transaction is no longer under review.');
+    }
+
+    /** Staff confirmed in Worldline that this attempt was not charged (or was refunded). */
+    public function dismissPayment(ExpressPayService $expressPay, string $crmId, string $orderNumber): RedirectResponse
+    {
+        $updated = DB::table('payment_transactions')
+            ->where('id', $this->reviewTransaction($crmId, $orderNumber)->id)
+            ->where('status', ExpressPayService::REVIEW)
+            ->update([
+                'status' => ExpressPayService::CANCELLED,
+                'message_text' => 'Dismissed by EQA staff: not charged or refunded in Worldline',
+                'updated_at' => now(),
+            ]);
+
+        return back()->with($updated ? 'success' : 'error', $updated ? 'Transaction dismissed.' : 'This transaction is no longer under review.');
+    }
+
+    private function reviewTransaction(string $crmId, string $orderNumber): object
+    {
+        abort_unless(ctype_digit($orderNumber), 404);
+        $transaction = DB::table('payment_transactions')
+            ->where('invoice_crm_id', $crmId)
+            ->where('order_number', (int) $orderNumber)
+            ->first();
+        abort_if($transaction === null, 404);
+
+        return $transaction;
     }
 
     public function receipt(string $crmId): BinaryFileResponse

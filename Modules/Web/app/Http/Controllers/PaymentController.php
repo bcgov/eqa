@@ -22,6 +22,8 @@ use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
  */
 class PaymentController extends Controller
 {
+    public const UNDER_REVIEW_MESSAGE = 'Your payment may have been received but could not be confirmed automatically. Please do not pay again. EQA staff will confirm it and update your invoice; contact EQA@gov.bc.ca with any questions.';
+
     public function __construct(private readonly ExpressPayService $expressPay) {}
 
     public function invoices(Request $request): Response
@@ -36,6 +38,7 @@ class PaymentController extends Controller
                 ->map(function (object $invoice): object {
                     $invoice->amount_due = $this->expressPay->amountDue($invoice);
                     $invoice->payable = $this->expressPay->isPayable($invoice);
+                    $invoice->payment_under_review = $this->expressPay->hasPaymentUnderReview((string) $invoice->crm_id);
 
                     return $invoice;
                 })
@@ -74,6 +77,9 @@ class PaymentController extends Controller
         }
 
         $invoice = DB::table('invoices')->where('crm_id', $invoice->crm_id)->first();
+        if ($this->expressPay->hasPaymentUnderReview((string) $invoice->crm_id)) {
+            return back()->with('error', self::UNDER_REVIEW_MESSAGE);
+        }
         if (! $this->expressPay->isPayable($invoice)) {
             return back()->with('error', 'This invoice has no outstanding balance.');
         }
@@ -98,8 +104,10 @@ class PaymentController extends Controller
             return redirect('/web/invoices')->with('error', 'We could not find that payment. If you were charged, please contact EQA@gov.bc.ca.');
         }
 
-        // The redirect's query string can be altered by the user, so confirm with Worldline directly.
-        $status = $this->expressPay->reconcile($transaction);
+        // The redirect's query string can be altered by the user, so confirm with Worldline directly;
+        // the redirect itself is only trusted when its hashValue verifies.
+        $signedRedirect = $this->expressPay->verifiedRedirect((string) $request->server('QUERY_STRING', ''));
+        $status = $this->expressPay->reconcile($transaction, $signedRedirect);
         $returnTo = $transaction->application_crm_id ? '/web/applications/'.$transaction->application_crm_id : '/web/invoices';
 
         if ($transaction->institution_crm_id !== $request->session()->get('portal_institution')) {
@@ -111,7 +119,7 @@ class PaymentController extends Controller
             ExpressPayService::CANCELLED => ['error', 'Payment was cancelled. Your invoice has not been paid.'],
             ExpressPayService::DECLINED, ExpressPayService::ABANDONED => ['error', 'Payment was not completed. Your invoice has not been paid.'],
             ExpressPayService::PENDING => ['error', 'We are still confirming your payment with the payment provider. Please check back in a few minutes.'],
-            default => ['error', 'Your payment needs to be reviewed by EQA staff. Please contact EQA@gov.bc.ca.'],
+            default => ['error', self::UNDER_REVIEW_MESSAGE],
         };
 
         return redirect($returnTo)->with($level, $message);

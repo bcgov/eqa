@@ -186,6 +186,7 @@ class WebPortalController extends Controller
             ->map(function (object $invoice) use ($expressPay): object {
                 $invoice->amount_due = $expressPay->amountDue($invoice);
                 $invoice->payable = $expressPay->isPayable($invoice);
+                $invoice->payment_under_review = $expressPay->hasPaymentUnderReview((string) $invoice->crm_id);
 
                 return $invoice;
             });
