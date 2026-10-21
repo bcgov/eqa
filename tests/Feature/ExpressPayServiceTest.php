@@ -82,6 +82,15 @@ class ExpressPayServiceTest extends TestCase
         $this->assertDatabaseHas('payment_transactions', ['order_number' => 500000001, 'status' => 'pending', 'amount' => 80, 'user_id' => 7]);
     }
 
+    public function test_order_number_base_is_configurable_per_environment(): void
+    {
+        config(['services.expresspay.order_number_base' => 600_000_000]);
+
+        $payment = $this->service->begin($this->invoice(), 'https://example.test/receipt', null);
+
+        $this->assertSame(600_000_001, $payment['order_number']);
+    }
+
     public function test_approved_query_marks_transaction_and_invoice_paid(): void
     {
         Http::fake(['*' => Http::response('trnApproved=1&trnId=10000016&authCode=TEST&messageId=1&messageText=Approved&trnAmount=80.00&cardType=VI&trnOrderNumber=500000001')]);
@@ -163,6 +172,55 @@ class ExpressPayServiceTest extends TestCase
         $this->service->begin($this->invoice(), 'https://example.test/receipt', null);
 
         $this->assertFalse($this->service->stillInProgress($this->transaction()));
+    }
+
+    public function test_payment_under_review_blocks_paying_again(): void
+    {
+        Http::fake(['*' => Http::response('trnApproved=0&messageId=760&messageText=Multiple+Transaction+Matches+Found')]);
+        $this->service->begin($this->invoice(), 'https://example.test/receipt', null);
+
+        $this->assertTrue($this->service->isPayable($this->invoice()));
+        $this->assertSame(ExpressPayService::REVIEW, $this->service->reconcile($this->transaction()));
+
+        $this->assertTrue($this->service->hasPaymentUnderReview('inv-1'));
+        $this->assertFalse($this->service->isPayable($this->invoice()));
+    }
+
+    public function test_ambiguous_query_settles_from_hash_verified_receipt_redirect(): void
+    {
+        Http::fake(['*' => Http::response('trnApproved=0&messageId=760&messageText=Multiple+Transaction+Matches+Found')]);
+        $this->service->begin($this->invoice(), 'https://example.test/receipt', null);
+
+        $body = 'trnApproved=1&trnId=10000020&messageId=1&messageText=Approved&authCode=TEST&trnAmount=80.00&trnOrderNumber=500000001';
+        $redirect = $this->service->verifiedRedirect($body.'&hashValue='.md5($body.'secret'));
+
+        $this->assertSame(ExpressPayService::APPROVED, $this->service->reconcile($this->transaction(), $redirect));
+        $this->assertSame('Paid', $this->invoice()->invoice_status);
+        $this->assertSame('10000020', $this->invoice()->transaction_reference);
+    }
+
+    public function test_tampered_or_unsigned_receipt_redirect_is_ignored(): void
+    {
+        $body = 'trnApproved=1&trnId=10000020&trnAmount=80.00&trnOrderNumber=500000001';
+
+        $this->assertNull($this->service->verifiedRedirect($body));
+        $this->assertNull($this->service->verifiedRedirect($body.'&hashValue='.md5('trnApproved=0'.'secret')));
+        $this->assertNull($this->service->verifiedRedirect(str_replace('80.00', '1.00', $body).'&hashValue='.md5($body.'secret')));
+    }
+
+    public function test_staff_can_accept_a_payment_under_review(): void
+    {
+        Http::fake(['*' => Http::response('trnApproved=0&messageId=760')]);
+        $this->service->begin($this->invoice(), 'https://example.test/receipt', null);
+        $this->service->reconcile($this->transaction());
+
+        $this->assertTrue($this->service->acceptReviewed($this->transaction(), '10000021', 'TEST'));
+        $this->assertFalse($this->service->acceptReviewed($this->transaction(), '10000021', 'TEST'));
+
+        $this->assertSame('approved', $this->transaction()->status);
+        $this->assertSame('Paid', $this->invoice()->invoice_status);
+        $this->assertEquals(80, $this->invoice()->payment_amount);
+        $this->assertEquals(1, DB::table('applications')->where('crm_id', 'app-1')->value('fees_payment_received'));
     }
 
     private function invoice(): object

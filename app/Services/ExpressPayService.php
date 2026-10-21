@@ -52,7 +52,18 @@ class ExpressPayService
 
     public function isPayable(object $invoice): bool
     {
-        return ! in_array($invoice->invoice_status ?? null, ['Paid', 'Expired'], true) && $this->amountDue($invoice) > 0;
+        return ! in_array($invoice->invoice_status ?? null, ['Paid', 'Expired'], true)
+            && $this->amountDue($invoice) > 0
+            && ! $this->hasPaymentUnderReview((string) ($invoice->crm_id ?? ''));
+    }
+
+    /** Worldline may have taken this payment but the app could not confirm it: never invite the payer to pay again. */
+    public function hasPaymentUnderReview(string $invoiceCrmId): bool
+    {
+        return DB::table('payment_transactions')
+            ->where('invoice_crm_id', $invoiceCrmId)
+            ->where('status', self::REVIEW)
+            ->exists();
     }
 
     /** Ministry staff impersonating an institution must not pay on its behalf. */
@@ -88,7 +99,10 @@ class ExpressPayService
                 'updated_at' => Carbon::now(),
             ]);
 
-            $orderNumber = self::ORDER_NUMBER_BASE + (int) $id;
+            $orderNumber = ((int) config('services.expresspay.order_number_base') ?: self::ORDER_NUMBER_BASE) + (int) $id;
+            if ($orderNumber > 9_999_999_999) {
+                throw new \RuntimeException('Express Pay order numbers must stay within 10 digits; lower EXPRESS_PAY_ORDER_NUMBER_BASE.');
+            }
             DB::table('payment_transactions')->where('id', $id)->update(['order_number' => $orderNumber]);
 
             return $orderNumber;
@@ -109,8 +123,14 @@ class ExpressPayService
         ];
     }
 
-    /** Ask Worldline for the result of a pending transaction and settle it. Returns the resulting status. */
-    public function reconcile(object $transaction): string
+    /**
+     * Ask Worldline for the result of a pending transaction and settle it. Returns the resulting status.
+     * When the order-number lookup is unavailable or ambiguous (760), a hash-verified receipt redirect
+     * for the same order is used instead.
+     *
+     * @param  array<string, mixed>|null  $signedRedirect  output of verifiedRedirect()
+     */
+    public function reconcile(object $transaction, ?array $signedRedirect = null): string
     {
         if ($transaction->status !== self::PENDING) {
             return $transaction->status;
@@ -118,7 +138,67 @@ class ExpressPayService
 
         $response = $this->query((string) $transaction->order_number);
 
+        $ambiguous = $response === null || (string) ($response['messageId'] ?? '') === '760';
+        if ($ambiguous && $signedRedirect !== null
+            && (string) ($signedRedirect['trnOrderNumber'] ?? '') === (string) $transaction->order_number) {
+            $response = $signedRedirect;
+        }
+
         return $response === null ? self::PENDING : $this->settle($transaction, $response);
+    }
+
+    /**
+     * The transaction response Worldline appends to the receipt redirect, but only if its hashValue
+     * (MD5 of the text before "&hashValue=" followed by the hash key) proves it was not altered.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function verifiedRedirect(string $rawQuery): ?array
+    {
+        $pos = strpos($rawQuery, '&hashValue=');
+        if ($pos === false) {
+            return null;
+        }
+
+        $signed = substr($rawQuery, 0, $pos);
+        $given = strtolower(explode('&', substr($rawQuery, $pos + 11))[0]);
+        if (! hash_equals(md5($signed.config('services.expresspay.hash_key')), $given)) {
+            Log::warning('Express Pay receipt redirect failed hash validation.');
+
+            return null;
+        }
+
+        parse_str($signed, $parsed);
+
+        return $parsed;
+    }
+
+    /** EQA staff found the payment for a transaction under review in the Worldline report. */
+    public function acceptReviewed(object $transaction, string $trnId, ?string $authCode): bool
+    {
+        $accepted = DB::transaction(function () use ($transaction, $trnId, $authCode): bool {
+            $current = DB::table('payment_transactions')->where('id', $transaction->id)->lockForUpdate()->first();
+            if ($current === null || $current->status !== self::REVIEW) {
+                return false;
+            }
+
+            DB::table('payment_transactions')->where('id', $current->id)->update([
+                'status' => self::APPROVED,
+                'trn_id' => $trnId,
+                'auth_code' => $authCode,
+                'message_text' => 'Accepted by EQA staff from the Worldline report',
+                'updated_at' => Carbon::now(),
+            ]);
+            $this->applyToInvoice($current, ['trnId' => $trnId, 'authCode' => $authCode]);
+
+            return true;
+        });
+
+        if ($accepted) {
+            app(ApplicationFeeService::class)->invoicePaid((string) $transaction->invoice_crm_id);
+        }
+
+        return $accepted;
     }
 
     /**
@@ -264,10 +344,18 @@ class ExpressPayService
             return self::APPROVED;
         }
 
+        if ((string) ($response['messageId'] ?? '') === '760') {
+            Log::warning('Express Pay found more than one transaction for this order number; check the order number base per environment.', [
+                'trnOrderNumber' => $response['trnOrderNumber'] ?? null,
+                'messageText' => $response['messageText'] ?? null,
+            ]);
+
+            return self::REVIEW;
+        }
+
         return match ((string) ($response['messageId'] ?? '')) {
             // Not processed yet; after hashExpiry it never will be.
             '559' => Carbon::now()->greaterThan($hashExpiresAt) ? self::ABANDONED : self::PENDING,
-            '760' => self::REVIEW,
             '761', '766' => self::CANCELLED,
             default => self::DECLINED,
         };

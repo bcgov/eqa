@@ -114,6 +114,7 @@ const affirmations = computed(() => [
                         <td class="py-2 text-slate-600">{{ i.invoice_status }}</td>
                         <td class="py-2 text-right">
                             <button v-if="i.payable && canPayOnline" type="button" :disabled="busy" @click="pay(i)" class="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">Pay Online</button>
+                            <span v-else-if="i.payment_under_review" class="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" title="Do not pay again. EQA staff will confirm this payment.">Payment being confirmed</span>
                         </td>
                     </tr>
                 </tbody>
