@@ -103,7 +103,7 @@ class PaymentController extends Controller
         $rawQuery = (string) $request->server('QUERY_STRING', '');
         $signedRedirect = $this->expressPay->verifiedRedirect($rawQuery);
 
-        Log::channel('expresspay')->info('Express Pay receipt redirect received.', [
+        Log::error('Express Pay receipt redirect received.', [
             'order_number' => $orderNumber,
             'session_order' => $sessionOrder,
             'has_hash' => str_contains($rawQuery, '&hashValue='),
@@ -116,7 +116,7 @@ class PaymentController extends Controller
             : null;
 
         if ($transaction === null) {
-            Log::channel('expresspay')->warning('Express Pay receipt redirect for an unknown order.', ['order_number' => $orderNumber]);
+            Log::error('Express Pay receipt redirect for an unknown order.', ['order_number' => $orderNumber]);
 
             return redirect('/web/invoices')->with('error', 'We could not find that payment. If you were charged, please contact EQA@gov.bc.ca.');
         }
@@ -126,7 +126,7 @@ class PaymentController extends Controller
         $status = $this->expressPay->reconcile($transaction, $signedRedirect);
         $returnTo = $transaction->application_crm_id ? '/web/applications/'.$transaction->application_crm_id : '/web/invoices';
 
-        Log::channel('expresspay')->info('Express Pay receipt outcome.', ['order_number' => $transaction->order_number, 'status' => $status]);
+        Log::error('Express Pay receipt outcome.', ['order_number' => $transaction->order_number, 'status' => $status]);
 
         if ($transaction->institution_crm_id !== $request->session()->get('portal_institution')) {
             return redirect('/web/invoices')->with('success', 'Your payment response has been received.');

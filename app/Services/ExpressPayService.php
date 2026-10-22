@@ -13,7 +13,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Modules\Admin\Services\ApplicationFeeService;
-use Psr\Log\LoggerInterface;
 
 /**
  * BC Express Pay single payments (trnType P) and transaction queries (trnType Q)
@@ -150,7 +149,7 @@ class ExpressPayService
 
         if ($redirect !== null && ($ambiguous || $redirectOnlyApproval)) {
             if ($redirectOnlyApproval) {
-                $this->log()->warning('Express Pay query did not report the approval in the signed receipt redirect; using the redirect.', [
+                Log::error('Express Pay query did not report the approval in the signed receipt redirect; using the redirect.', [
                     'order_number' => $transaction->order_number,
                     'query' => $response !== null ? self::loggable($response) : null,
                 ]);
@@ -177,7 +176,7 @@ class ExpressPayService
         $signed = substr($rawQuery, 0, $pos);
         $given = strtolower(explode('&', substr($rawQuery, $pos + 11))[0]);
         if (! hash_equals(md5($signed.config('services.expresspay.hash_key')), $given)) {
-            $this->log()->warning('Express Pay receipt redirect failed hash validation.');
+            Log::error('Express Pay receipt redirect failed hash validation.');
 
             return null;
         }
@@ -260,13 +259,13 @@ class ExpressPayService
         try {
             $response = Http::timeout(30)->get(config('services.expresspay.query_url').'?'.$query);
         } catch (ConnectionException $e) {
-            $this->log()->warning('Express Pay query could not reach the gateway.', ['order_number' => $orderNumber, 'error' => $e->getMessage()]);
+            Log::error('Express Pay query could not reach the gateway.', ['order_number' => $orderNumber, 'error' => $e->getMessage()]);
 
             return null;
         }
 
         if (! $response->successful()) {
-            $this->log()->warning('Express Pay query failed.', [
+            Log::error('Express Pay query failed.', [
                 'order_number' => $orderNumber,
                 'status' => $response->status(),
                 'body' => mb_substr(strip_tags($response->body()), 0, 500),
@@ -277,7 +276,7 @@ class ExpressPayService
 
         parse_str(trim($response->body()), $parsed);
 
-        $this->log()->info('Express Pay query response.', [
+        Log::error('Express Pay query response.', [
             'order_number' => $orderNumber,
             'query_url' => config('services.expresspay.query_url'),
             'http_status' => $response->status(),
@@ -301,11 +300,6 @@ class ExpressPayService
         ]));
     }
 
-    private function log(): LoggerInterface
-    {
-        return Log::channel('expresspay');
-    }
-
     /**
      * Apply a Worldline response to a pending transaction (and its invoice when approved).
      *
@@ -316,7 +310,7 @@ class ExpressPayService
         $status = $this->outcome($response, Carbon::parse($transaction->hash_expires_at));
 
         if ($status === self::APPROVED && abs((float) ($response['trnAmount'] ?? 0) - (float) $transaction->amount) >= 0.01) {
-            $this->log()->error('Express Pay approved amount does not match the transaction.', [
+            Log::error('Express Pay approved amount does not match the transaction.', [
                 'order_number' => $transaction->order_number,
                 'expected' => $transaction->amount,
                 'trnAmount' => $response['trnAmount'] ?? null,
@@ -363,7 +357,7 @@ class ExpressPayService
             app(ApplicationFeeService::class)->invoicePaid((string) $transaction->invoice_crm_id);
         }
 
-        $this->log()->info('Express Pay transaction settled.', [
+        Log::error('Express Pay transaction settled.', [
             'order_number' => $transaction->order_number,
             'invoice_crm_id' => $transaction->invoice_crm_id,
             'status' => $result,
@@ -383,7 +377,7 @@ class ExpressPayService
     {
         // A system/user error (e.g. bad hash) says nothing about the payment itself.
         if (! array_key_exists('trnApproved', $response) || in_array($response['errorType'] ?? 'N', ['S', 'U'], true)) {
-            $this->log()->warning('Express Pay returned an error response.', [
+            Log::error('Express Pay returned an error response.', [
                 'errorType' => $response['errorType'] ?? null,
                 'messageText' => $response['messageText'] ?? null,
             ]);
@@ -396,7 +390,7 @@ class ExpressPayService
         }
 
         if ((string) ($response['messageId'] ?? '') === '760') {
-            $this->log()->warning('Express Pay found more than one transaction for this order number; check the order number base per environment.', [
+            Log::error('Express Pay found more than one transaction for this order number; check the order number base per environment.', [
                 'trnOrderNumber' => $response['trnOrderNumber'] ?? null,
                 'messageText' => $response['messageText'] ?? null,
             ]);
@@ -424,7 +418,7 @@ class ExpressPayService
             return self::DECLINED;
         }
 
-        $this->log()->warning('Express Pay query returned an unrecognised response; leaving the transaction pending.', [
+        Log::error('Express Pay query returned an unrecognised response; leaving the transaction pending.', [
             'trnOrderNumber' => $response['trnOrderNumber'] ?? null,
             'messageId' => $response['messageId'] ?? null,
             'messageText' => $response['messageText'] ?? null,
@@ -450,14 +444,14 @@ class ExpressPayService
     {
         $invoice = DB::table('invoices')->where('crm_id', $transaction->invoice_crm_id)->lockForUpdate()->first();
         if ($invoice === null) {
-            $this->log()->error('Express Pay approved a payment for a missing invoice.', ['order_number' => $transaction->order_number]);
+            Log::error('Express Pay approved a payment for a missing invoice.', ['order_number' => $transaction->order_number]);
 
             return;
         }
 
         $due = $this->amountDue($invoice);
         if ($due <= 0) {
-            $this->log()->warning('Express Pay payment received for an invoice with no balance; refund may be needed.', [
+            Log::error('Express Pay payment received for an invoice with no balance; refund may be needed.', [
                 'order_number' => $transaction->order_number,
                 'invoice_crm_id' => $invoice->crm_id,
             ]);
