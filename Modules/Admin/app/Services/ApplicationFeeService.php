@@ -100,7 +100,7 @@ class ApplicationFeeService
 
     /**
      * Administrative fee: multiple location fee (private institutions with more than one active
-     * location) plus a per international student fee (study permit + other, from the application).
+     * location) plus a per international student fee (study permit students, from the application).
      *
      * @return array{amount: float, description: string, line_items: list<array<string, mixed>>}
      */
@@ -113,7 +113,6 @@ class ApplicationFeeService
             ? DB::table('campuses')->where('institution_crm_id', $institution->crm_id)->where('status', 'Active')->count()
             : 0;
         $permit = (int) ($application->intl_students_permit ?? 0);
-        $other = (int) ($application->intl_students_other ?? 0);
         $locationText = $locations.' active location'.($locations === 1 ? '' : 's');
 
         $lines = [];
@@ -123,10 +122,10 @@ class ApplicationFeeService
         } else {
             $notes[] = 'Multiple Location Fee not applied ('.($private ? 'private institution, '.$locationText : 'public institution').')';
         }
-        if ($permit + $other > 0) {
-            $lines[] = $this->line('international_students', "International Student Fee ({$permit} study permit + {$other} other)", $permit + $other, (float) config('eqa.fees.per_international_student'));
+        if ($permit > 0) {
+            $lines[] = $this->line('international_students', 'International Student Fee (study permit students)', $permit, (float) config('eqa.fees.per_international_student'));
         } else {
-            $notes[] = 'International Student Fee not applied (0 international students)';
+            $notes[] = 'International Student Fee not applied (0 study permit students)';
         }
 
         return $this->quote($lines, $notes);

@@ -253,9 +253,9 @@ class RedBoxWorkflowTest extends TestCase
 
         $invoice = $this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE);
         $this->assertNotNull($invoice);
-        $this->assertEquals(3250, $invoice->total_charges, 'Multiple location fee + 125 international students x $2; staff cannot override.');
+        $this->assertEquals(3200, $invoice->total_charges, 'Multiple location fee + 100 study permit students x $2 ("other" not charged); staff cannot override.');
         $this->assertSame(
-            "Multiple Location Fee (private institution, 3 active locations): \$3,000.00\nInternational Student Fee (100 study permit + 25 other): 125 x \$2.00 = \$250.00",
+            "Multiple Location Fee (private institution, 3 active locations): \$3,000.00\nInternational Student Fee (study permit students): 100 x \$2.00 = \$200.00",
             $invoice->description,
         );
         $this->assertSame(['multi_location', 'international_students'], array_column(json_decode($invoice->line_items, true), 'code'));
@@ -274,12 +274,12 @@ class RedBoxWorkflowTest extends TestCase
         $this->asMinistry()->post("/admin/applications/{$single}/advance", ['action' => 'approve']);
 
         $invoice = $this->invoice($single, ApplicationFeeService::FEE_ADMIN_VARIABLE);
-        $this->assertEquals(250, $invoice->total_charges);
+        $this->assertEquals(200, $invoice->total_charges);
         $this->assertStringContainsString('Multiple Location Fee not applied (private institution, 1 active location)', $invoice->description);
 
         $this->institutionLocations(2, ApplicationFeeService::PUBLIC_QA_MET_THROUGH);
         $quote = app(ApplicationFeeService::class)->adminFeeQuote($this->application($single));
-        $this->assertEquals(250, $quote['amount']);
+        $this->assertEquals(200, $quote['amount']);
         $this->assertStringContainsString('Multiple Location Fee not applied (public institution)', $quote['description']);
     }
 
@@ -287,7 +287,7 @@ class RedBoxWorkflowTest extends TestCase
     {
         $this->institutionLocations(1, ApplicationFeeService::PUBLIC_QA_MET_THROUGH);
         $id = $this->applicationAt('application_approval', 'Under Review');
-        DB::table('applications')->where('crm_id', $id)->update(['intl_students_permit' => 0, 'intl_students_other' => null]);
+        DB::table('applications')->where('crm_id', $id)->update(['intl_students_permit' => 0]);
 
         $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve'])->assertSessionHas('success');
 
@@ -295,7 +295,7 @@ class RedBoxWorkflowTest extends TestCase
         $this->assertEquals(0, $invoice->total_charges);
         $this->assertSame('Paid', $invoice->invoice_status);
         $this->assertSame('No Charge', $invoice->payment_method);
-        $this->assertStringContainsString('International Student Fee not applied (0 international students)', $invoice->description);
+        $this->assertStringContainsString('International Student Fee not applied (0 study permit students)', $invoice->description);
         $this->assertSame('end', $this->application($id)->workflow_stage);
         $this->assertSame('Designated', DB::table('institutions')->where('crm_id', self::INSTITUTION)->value('eqa_status'));
     }
