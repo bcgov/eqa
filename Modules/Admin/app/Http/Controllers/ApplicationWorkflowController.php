@@ -106,8 +106,6 @@ class ApplicationWorkflowController extends Controller
             'affirm_understands_comply' => ['boolean'],
             'affirm_authorized' => ['boolean'],
             'representative_signature' => ['nullable', 'string', 'max:255'],
-            'application_fee' => ['nullable', 'numeric', 'min:0'],
-            'annual_designation_fee' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         DB::table('applications')->where('crm_id', $crmId)->update($data);
@@ -150,18 +148,18 @@ class ApplicationWorkflowController extends Controller
             case 'approve':
             case 'pass':
                 $data = $request->validate([
-                    'admin_fee' => ['nullable', 'numeric', 'min:0.01'],
                     'compliance_order' => ['boolean'],
                     'compliance_order_notes' => ['nullable', 'string', 'max:2000', 'required_if_accepted:compliance_order'],
                 ]);
                 $invoice = $fees->approve(
                     $application,
-                    (float) ($data['admin_fee'] ?? config('eqa.fees.admin_variable')),
                     (bool) ($data['compliance_order'] ?? false),
                     (string) ($data['compliance_order_notes'] ?? ''),
                 );
 
-                return back()->with('success', 'Application approved. Admin variable fee invoice '.$invoice->invoice_number.' sent to the institution.');
+                return back()->with('success', $invoice->invoice_status === 'Paid'
+                    ? 'Application approved. No administrative fee applies, so the designation has been granted.'
+                    : 'Application approved. Administrative fee invoice '.$invoice->invoice_number.' ($'.number_format((float) $invoice->total_charges, 2).') sent to the institution.');
             case 'confirm_admin_fee':
             case 'confirm_appeal_fee':
                 $invoice = $fees->invoiceFor($crmId, $action === 'confirm_admin_fee' ? ApplicationFeeService::FEE_ADMIN_VARIABLE : ApplicationFeeService::FEE_APPEAL);

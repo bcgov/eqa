@@ -75,6 +75,7 @@ function statusClass(s) {
             <dl class="divide-y divide-slate-100 text-sm">
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Invoice Number</dt><dd class="font-mono text-slate-800">{{ invoice.invoice_number }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Invoice Date</dt><dd class="text-slate-800">{{ invoice.invoice_date || '—' }}</dd></div>
+                <div v-if="invoice.description" class="flex justify-between gap-4 py-2"><dt class="text-slate-500">Description</dt><dd class="whitespace-pre-line text-right text-slate-800">{{ invoice.description }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Application Reference</dt>
                     <dd>
                         <Link v-if="invoice.application_crm_id" :href="`/admin/applications/${invoice.application_crm_id}`" class="font-mono text-indigo-600 hover:underline">{{ invoice.application_reference || '—' }}</Link>

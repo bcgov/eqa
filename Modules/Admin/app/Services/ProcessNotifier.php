@@ -251,6 +251,7 @@ class ProcessNotifier
                 : '',
             'invoice_number' => (string) ($invoice->invoice_number ?? ''),
             'admin_fee' => '$'.number_format((float) ($invoice->total_charges ?? 0), 2),
+            'invoice_description' => (string) ($invoice->description ?? ''),
             'due_date' => (string) ($invoice->due_date ?? ''),
         ], $contact['email'] ?: null, ['institution_crm_id' => $institution->crm_id ?? null]);
     }

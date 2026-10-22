@@ -108,7 +108,9 @@ const affirmations = computed(() => [
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     <tr v-for="i in invoices" :key="i.crm_id">
-                        <td class="py-2 text-slate-700">{{ feeLabels[i.fee_type] || 'Fees' }}</td>
+                        <td class="py-2 text-slate-700">{{ feeLabels[i.fee_type] || 'Fees' }}
+                            <p v-if="i.description" class="whitespace-pre-line text-xs text-slate-500">{{ i.description }}</p>
+                        </td>
                         <td class="py-2 font-mono text-xs text-slate-600">{{ i.invoice_number }}</td>
                         <td class="py-2 text-slate-600">{{ dash(i.due_date) }}</td>
                         <td class="py-2 text-right text-slate-800">{{ currency(i.total_charges) }}</td>
