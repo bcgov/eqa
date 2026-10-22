@@ -10,6 +10,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -99,20 +100,33 @@ class PaymentController extends Controller
     {
         $sessionOrder = $request->session()->pull('express_pay_order');
         $orderNumber = (string) $request->query('trnOrderNumber', (string) $sessionOrder);
+        $rawQuery = (string) $request->server('QUERY_STRING', '');
+        $signedRedirect = $this->expressPay->verifiedRedirect($rawQuery);
+
+        Log::channel('expresspay')->info('Express Pay receipt redirect received.', [
+            'order_number' => $orderNumber,
+            'session_order' => $sessionOrder,
+            'has_hash' => str_contains($rawQuery, '&hashValue='),
+            'hash_verified' => $signedRedirect !== null,
+            'redirect' => ExpressPayService::loggable($request->query()),
+        ]);
 
         $transaction = ctype_digit($orderNumber)
             ? DB::table('payment_transactions')->where('order_number', (int) $orderNumber)->first()
             : null;
 
         if ($transaction === null) {
+            Log::channel('expresspay')->warning('Express Pay receipt redirect for an unknown order.', ['order_number' => $orderNumber]);
+
             return redirect('/web/invoices')->with('error', 'We could not find that payment. If you were charged, please contact EQA@gov.bc.ca.');
         }
 
         // The redirect's query string can be altered by the user, so confirm with Worldline directly;
         // the redirect itself is only trusted when its hashValue verifies.
-        $signedRedirect = $this->expressPay->verifiedRedirect((string) $request->server('QUERY_STRING', ''));
         $status = $this->expressPay->reconcile($transaction, $signedRedirect);
         $returnTo = $transaction->application_crm_id ? '/web/applications/'.$transaction->application_crm_id : '/web/invoices';
+
+        Log::channel('expresspay')->info('Express Pay receipt outcome.', ['order_number' => $transaction->order_number, 'status' => $status]);
 
         if ($transaction->institution_crm_id !== $request->session()->get('portal_institution')) {
             return redirect('/web/invoices')->with('success', 'Your payment response has been received.');

@@ -89,9 +89,14 @@ class InvoiceController extends Controller
             'auth_code' => ['nullable', 'string', 'max:32'],
         ]);
 
-        $accepted = $expressPay->acceptReviewed($this->reviewTransaction($crmId, $orderNumber), $data['trn_id'], $data['auth_code'] ?? null);
+        $invoice = DB::table('invoices')->where('crm_id', $crmId)->first();
+        if (($invoice->invoice_status ?? null) === 'Paid') {
+            return back()->with('error', 'This invoice is already paid. Refund the duplicate charge in Worldline instead.');
+        }
 
-        return back()->with($accepted ? 'success' : 'error', $accepted ? 'Payment accepted and applied to the invoice.' : 'This transaction is no longer under review.');
+        $accepted = $expressPay->acceptUnconfirmed($this->reviewTransaction($crmId, $orderNumber), $data['trn_id'], $data['auth_code'] ?? null);
+
+        return back()->with($accepted ? 'success' : 'error', $accepted ? 'Payment accepted and applied to the invoice.' : 'This transaction can no longer be accepted.');
     }
 
     /** Staff confirmed in Worldline that this attempt was not charged (or was refunded). */

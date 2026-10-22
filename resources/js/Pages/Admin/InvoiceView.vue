@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { Head, Link, router, usePage } from '@inertiajs/vue3'
 
 const props = defineProps({
@@ -9,7 +9,9 @@ const props = defineProps({
 
 const flash = computed(() => usePage().props.flash || {})
 const errors = computed(() => usePage().props.errors || {})
-const underReview = computed(() => props.transactions.filter((t) => t.status === 'review'))
+const manual = ref([])
+const underReview = computed(() => props.transactions.filter((t) => t.status === 'review' || manual.value.includes(t.order_number)))
+const canOverride = (t) => ['declined', 'abandoned', 'cancelled'].includes(t.status) && props.invoice.invoice_status !== 'Paid'
 const accepting = reactive(Object.fromEntries(props.transactions.map((t) => [t.order_number, { trn_id: '', auth_code: '' }])))
 
 function accept(t) {
@@ -57,14 +59,15 @@ function statusClass(s) {
     <div v-if="flash.error" class="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{{ flash.error }}</div>
 
     <div v-if="underReview.length" class="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-        <p class="font-semibold">{{ underReview.length }} online payment(s) need review</p>
+        <p class="font-semibold">{{ underReview.length }} online payment(s) to resolve</p>
         <p class="mt-1">Express Pay could not confirm these attempts automatically, and the institution cannot pay online again until they are resolved. Search the Worldline transaction report for each order number. Accept a charge to apply it to this invoice. Refund any duplicate charges in Worldline, then dismiss them here.</p>
         <div v-for="t in underReview" :key="t.order_number" class="mt-3 flex flex-wrap items-end gap-2">
             <span class="font-mono text-xs">Order {{ t.order_number }} · {{ money(t.amount) }}</span>
             <input v-model="accepting[t.order_number].trn_id" placeholder="Worldline Txn ID" class="w-36 rounded-md border border-slate-300 px-2 py-1 text-xs" />
             <input v-model="accepting[t.order_number].auth_code" placeholder="Auth code" class="w-28 rounded-md border border-slate-300 px-2 py-1 text-xs" />
             <button type="button" :disabled="!accepting[t.order_number].trn_id" @click="accept(t)" class="rounded-md bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50">Accept Payment</button>
-            <button type="button" @click="dismiss(t)" class="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">Dismiss</button>
+            <button v-if="t.status === 'review'" type="button" @click="dismiss(t)" class="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">Dismiss</button>
+            <button v-else type="button" @click="manual.splice(manual.indexOf(t.order_number), 1)" class="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
         </div>
         <p v-if="errors.trn_id" class="mt-2 text-xs text-red-700">{{ errors.trn_id }}</p>
     </div>
@@ -139,6 +142,7 @@ function statusClass(s) {
                         <th class="px-3 py-2">Auth Code</th>
                         <th class="px-3 py-2">Card</th>
                         <th class="px-3 py-2">Message</th>
+                        <th class="px-3 py-2"></th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
@@ -151,8 +155,11 @@ function statusClass(s) {
                         <td class="px-3 py-2 font-mono text-xs text-slate-600">{{ t.auth_code || '—' }}</td>
                         <td class="px-3 py-2 text-slate-600">{{ t.card_type || '—' }}</td>
                         <td class="px-3 py-2 text-slate-600">{{ t.message_text || '—' }}</td>
+                        <td class="px-3 py-2 text-right">
+                            <button v-if="canOverride(t) && !manual.includes(t.order_number)" type="button" @click="manual.push(t.order_number)" class="whitespace-nowrap text-xs text-indigo-600 hover:underline" title="Use only if the Worldline report shows this order as approved.">Accept payment…</button>
+                        </td>
                     </tr>
-                    <tr v-if="transactions.length === 0"><td colspan="8" class="px-3 py-6 text-center text-sm text-slate-400">No online payment attempts.</td></tr>
+                    <tr v-if="transactions.length === 0"><td colspan="9" class="px-3 py-6 text-center text-sm text-slate-400">No online payment attempts.</td></tr>
                 </tbody>
             </table>
         </div>

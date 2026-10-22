@@ -136,7 +136,8 @@ class ExpressPayServiceTest extends TestCase
         $past = Carbon::now()->subMinute();
 
         $this->assertSame('approved', $this->service->outcome(['trnApproved' => '1'], $future));
-        $this->assertSame('declined', $this->service->outcome(['trnApproved' => '0', 'messageId' => '7'], $future));
+        $this->assertSame('declined', $this->service->outcome(['trnApproved' => '0', 'trnId' => '10000030', 'messageId' => '7'], $future));
+        $this->assertSame('pending', $this->service->outcome(['trnApproved' => '0', 'trnId' => '0', 'messageId' => '16', 'messageText' => 'Invalid merchant'], $future));
         $this->assertSame('cancelled', $this->service->outcome(['trnApproved' => '0', 'messageId' => '761'], $future));
         $this->assertSame('pending', $this->service->outcome(['trnApproved' => '0', 'messageId' => '559'], $future));
         $this->assertSame('abandoned', $this->service->outcome(['trnApproved' => '0', 'messageId' => '559'], $past));
@@ -208,14 +209,35 @@ class ExpressPayServiceTest extends TestCase
         $this->assertNull($this->service->verifiedRedirect(str_replace('80.00', '1.00', $body).'&hashValue='.md5($body.'secret')));
     }
 
+    public function test_signed_redirect_approval_wins_over_a_query_that_does_not_report_it(): void
+    {
+        Http::fake(['*' => Http::response('trnApproved=0&trnId=0&messageId=16&messageText=Lookup+failed')]);
+        $this->service->begin($this->invoice(), 'https://example.test/receipt', null);
+
+        $body = 'trnApproved=1&trnId=10000040&messageId=1&messageText=Approved&authCode=TEST&trnAmount=80.00&trnOrderNumber=500000001';
+        $redirect = $this->service->verifiedRedirect($body.'&hashValue='.md5($body.'secret'));
+
+        $this->assertSame(ExpressPayService::APPROVED, $this->service->reconcile($this->transaction(), $redirect));
+        $this->assertSame('Paid', $this->invoice()->invoice_status);
+    }
+
+    public function test_unrecognised_query_response_is_not_recorded_as_declined(): void
+    {
+        Http::fake(['*' => Http::response('trnApproved=0&trnId=0&messageId=16&messageText=Lookup+failed')]);
+        $this->service->begin($this->invoice(), 'https://example.test/receipt', null);
+
+        $this->assertSame(ExpressPayService::PENDING, $this->service->reconcile($this->transaction()));
+        $this->assertSame('pending', $this->transaction()->status);
+    }
+
     public function test_staff_can_accept_a_payment_under_review(): void
     {
         Http::fake(['*' => Http::response('trnApproved=0&messageId=760')]);
         $this->service->begin($this->invoice(), 'https://example.test/receipt', null);
         $this->service->reconcile($this->transaction());
 
-        $this->assertTrue($this->service->acceptReviewed($this->transaction(), '10000021', 'TEST'));
-        $this->assertFalse($this->service->acceptReviewed($this->transaction(), '10000021', 'TEST'));
+        $this->assertTrue($this->service->acceptUnconfirmed($this->transaction(), '10000021', 'TEST'));
+        $this->assertFalse($this->service->acceptUnconfirmed($this->transaction(), '10000021', 'TEST'));
 
         $this->assertSame('approved', $this->transaction()->status);
         $this->assertSame('Paid', $this->invoice()->invoice_status);

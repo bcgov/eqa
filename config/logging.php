@@ -127,6 +127,31 @@ return [
             'path' => storage_path('logs/laravel.log'),
         ],
 
+        // Payment gateway traffic, kept regardless of LOG_LEVEL; stderr makes it visible in `oc logs`.
+        'expresspay' => [
+            'driver' => 'stack',
+            'channels' => ['expresspay_file', 'expresspay_stderr'],
+            'ignore_exceptions' => true,
+        ],
+
+        'expresspay_file' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/expresspay.log'),
+            'level' => env('EXPRESS_PAY_LOG_LEVEL', 'info'),
+            'days' => 90,
+            'replace_placeholders' => true,
+        ],
+
+        'expresspay_stderr' => [
+            'driver' => 'monolog',
+            'level' => env('EXPRESS_PAY_LOG_LEVEL', 'info'),
+            'handler' => StreamHandler::class,
+            'handler_with' => [
+                'stream' => 'php://stderr',
+            ],
+            'processors' => [PsrLogMessageProcessor::class],
+        ],
+
     ],
 
 ];
