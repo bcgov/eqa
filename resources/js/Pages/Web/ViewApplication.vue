@@ -9,13 +9,14 @@ const props = defineProps({
     canPayOnline: { type: Boolean, default: false },
     canEdit: { type: Boolean, default: false },
     canAppeal: { type: Boolean, default: false },
+    awaitingSubmission: { type: Boolean, default: false },
 })
 
 const flash = computed(() => usePage().props.flash || {})
 const busy = ref(false)
 const feeLabels = { application_new: 'New Application Fee', application_renewal: 'Renewal Application Fee', admin_variable: 'Administrative Fee', appeal: 'Appeal Fee' }
 const reopened = computed(() => props.canEdit && (props.application.need_additional_details === true || props.application.need_additional_details === 1))
-const unpaidApplicationFee = computed(() => props.invoices.some((i) => ['application_new', 'application_renewal'].includes(i.fee_type) && i.payable))
+const unpaidFee = computed(() => props.invoices.some((i) => i.payable))
 
 function post(url) {
     busy.value = true
@@ -101,17 +102,19 @@ const affirmations = computed(() => [
                 <b>Approved under compliance order:</b> {{ application.compliance_order_notes }}
             </p>
 
-            <table v-if="invoices.length" class="mb-4 min-w-full divide-y divide-slate-200 text-sm">
+            <table v-if="invoices.length && !awaitingSubmission" class="mb-4 min-w-full divide-y divide-slate-200 text-sm">
                 <thead class="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    <tr><th class="py-2">Fee</th><th class="py-2">Invoice #</th><th class="py-2">Due</th><th class="py-2 text-right">Balance</th><th class="py-2">Status</th><th></th></tr>
+                    <tr><th class="py-2">Fee</th><th class="py-2">Invoice #</th><th class="py-2">Due</th><th class="py-2 text-right">Amount</th><th class="py-2 pl-6">Status</th><th></th></tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     <tr v-for="i in invoices" :key="i.crm_id">
-                        <td class="py-2 text-slate-700">{{ feeLabels[i.fee_type] || 'Fees' }}</td>
+                        <td class="py-2 text-slate-700">{{ feeLabels[i.fee_type] || 'Fees' }}
+                            <p v-if="i.description" class="whitespace-pre-line text-xs text-slate-500">{{ i.description }}</p>
+                        </td>
                         <td class="py-2 font-mono text-xs text-slate-600">{{ i.invoice_number }}</td>
                         <td class="py-2 text-slate-600">{{ dash(i.due_date) }}</td>
-                        <td class="py-2 text-right text-slate-800">{{ currency(i.amount_due) }}</td>
-                        <td class="py-2 text-slate-600">{{ i.invoice_status }}</td>
+                        <td class="py-2 text-right text-slate-800">{{ currency(i.total_charges) }}</td>
+                        <td class="py-2 pl-6 text-slate-600">{{ i.invoice_status }}</td>
                         <td class="py-2 text-right">
                             <button v-if="i.payable && canPayOnline" type="button" :disabled="busy" @click="pay(i)" class="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">Pay Online</button>
                             <span v-else-if="i.payment_under_review" class="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" title="Do not pay again. EQA staff will confirm this payment.">Payment being confirmed</span>
@@ -120,10 +123,13 @@ const affirmations = computed(() => [
                 </tbody>
             </table>
 
+            <p v-if="unpaidFee" class="mb-4 text-sm text-slate-600">Pay online, or pay by cheque or another method and EQA staff will confirm your payment.</p>
+            <p v-if="awaitingSubmission" class="mb-4 text-sm text-slate-600">Your application has not been submitted. You can edit it until you submit it; the application fee is invoiced on submission.</p>
+
             <div class="flex flex-wrap gap-2">
                 <Link v-if="canEdit" :href="`/web/applications/${application.crm_id}/edit`" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Edit Application</Link>
                 <button v-if="reopened" type="button" :disabled="busy" @click="submitDraft" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">Resubmit Application</button>
-                <button v-else-if="canEdit && unpaidApplicationFee" type="button" :disabled="busy" @click="submitDraft" class="rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50" title="Submit now and pay the application fee by another method (e.g. cheque).">Submit &amp; Pay by Other Method</button>
+                <button v-else-if="awaitingSubmission" type="button" :disabled="busy" @click="submitDraft" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">Submit Application</button>
                 <button v-if="canAppeal" type="button" :disabled="busy" @click="appeal" class="rounded-md bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50">Appeal Decision (by {{ application.appeal_deadline }})</button>
             </div>
         </section>

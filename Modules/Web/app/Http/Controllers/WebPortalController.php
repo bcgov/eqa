@@ -183,9 +183,9 @@ class WebPortalController extends Controller
             ->where('application_crm_id', $application->crm_id)
             ->orderBy('invoice_number')
             ->get()
-            ->map(function (object $invoice) use ($expressPay): object {
+            ->map(function (object $invoice) use ($expressPay, $fees, $application): object {
                 $invoice->amount_due = $expressPay->amountDue($invoice);
-                $invoice->payable = $expressPay->isPayable($invoice);
+                $invoice->payable = $expressPay->isPayable($invoice) && ! $fees->awaitingSubmission($application);
                 $invoice->payment_under_review = $expressPay->hasPaymentUnderReview((string) $invoice->crm_id);
 
                 return $invoice;
@@ -198,6 +198,7 @@ class WebPortalController extends Controller
             'canPayOnline' => $expressPay->canUserPay($request->user(), $request->session()->has('impersonator_id')),
             'canEdit' => $application->status === 'Draft',
             'canAppeal' => $fees->canAppeal($application),
+            'awaitingSubmission' => $fees->awaitingSubmission($application),
         ]);
     }
 
@@ -605,7 +606,7 @@ class WebPortalController extends Controller
         $amount = (float) config('eqa.fees.'.$feeType);
         $crmId = (string) Str::uuid();
 
-        // Saved as a Draft: paying the application fee (or submitting for offline payment) submits it.
+        // Saved as a Draft; the application fee is invoiced once it is submitted.
         DB::table('applications')->insert(array_merge($data, [
             'crm_id' => $crmId,
             'reference' => $reference,
@@ -619,12 +620,8 @@ class WebPortalController extends Controller
             'total_due' => $amount,
         ]));
 
-        $fees->createInvoice(DB::table('applications')->where('crm_id', $crmId)->first(), $feeType, $amount);
-
-        $label = $feeType === ApplicationFeeService::FEE_APPLICATION_RENEWAL ? 'renewal' : 'new';
-
         return redirect('/web/applications/'.$crmId)
-            ->with('success', 'Application '.$reference.' saved as a draft. Pay the '.$label.' application fee to submit it.');
+            ->with('success', 'Application '.$reference.' saved as a draft. Review it and select Submit Application when it is ready.');
     }
 
     public function edit(Request $request, string $crmId): Response
@@ -648,15 +645,23 @@ class WebPortalController extends Controller
         return redirect('/web/applications/'.$crmId)->with('success', 'Application '.$application->reference.' updated.');
     }
 
-    /** Submit a draft without paying online (non Express Pay payment), or resubmit requested changes. */
+    /** Submit a draft (the application fee is then invoiced), or resubmit requested changes. */
     public function submit(Request $request, string $crmId): RedirectResponse
     {
         $application = $this->ownApplication($request, $crmId);
         abort_unless($application->workflow_stage === 'draft', 403);
 
-        app(ApplicationFeeService::class)->submit($application);
+        $fees = app(ApplicationFeeService::class);
+        $firstSubmission = $fees->awaitingSubmission($application);
+        $fees->submit($application);
 
-        return redirect('/web/applications/'.$crmId)->with('success', 'Application '.$application->reference.' submitted.');
+        $message = 'Application '.$application->reference.' submitted.';
+        $invoice = $fees->invoiceFor($crmId, ApplicationFeeService::APPLICATION_FEES);
+        if ($firstSubmission && $invoice !== null && $invoice->invoice_status !== 'Paid') {
+            $message .= ' Please pay the application fee (invoice '.$invoice->invoice_number.').';
+        }
+
+        return redirect('/web/applications/'.$crmId)->with('success', $message);
     }
 
     public function appeal(Request $request, string $crmId): RedirectResponse

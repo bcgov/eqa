@@ -89,17 +89,49 @@ class RedBoxWorkflowTest extends TestCase
         $this->asInstitution()->post('/web/applications', $this->applicationForm())->assertRedirect();
 
         $application = DB::table('applications')->first();
-        $invoice = $this->invoice($application->crm_id, ApplicationFeeService::FEE_APPLICATION_NEW);
         $this->assertSame('Draft', $application->status);
+        $this->assertNotNull($application->created_at, 'Timestamps are filled by the database.');
+        $this->assertSame(0, DB::table('invoices')->count(), 'No fee is requested before the application is submitted.');
+
+        $this->asInstitution()->post("/web/applications/{$application->crm_id}/submit")->assertSessionHas('success');
+        $invoice = $this->invoice($application->crm_id, ApplicationFeeService::FEE_APPLICATION_NEW);
         $this->assertEquals(config('eqa.fees.application_new'), $invoice->total_charges);
+        $this->assertSame('New Application Fee (fixed): $'.number_format(config('eqa.fees.application_new'), 2), $invoice->description);
+        $this->assertNotified('application_submission');
 
         $this->payOnline($invoice);
 
         $application = $this->application($application->crm_id);
         $this->assertSame('Pending Review', $application->status);
         $this->assertSame('pending_review', $application->workflow_stage);
+        $this->assertEquals(1, $application->fees_payment_received);
         $this->assertSame('Paid', $this->invoice($application->crm_id, ApplicationFeeService::FEE_APPLICATION_NEW)->invoice_status);
-        $this->assertNotified('application_submission');
+    }
+
+    public function test_draft_application_fee_cannot_be_paid_before_submission(): void
+    {
+        $this->asInstitution()->post('/web/applications', $this->applicationForm());
+        $application = DB::table('applications')->first();
+        // Drafts saved before this rule already have a fee invoice.
+        $invoice = app(ApplicationFeeService::class)->createInvoice($application, ApplicationFeeService::FEE_APPLICATION_NEW, 1000);
+
+        $this->asInstitution()->post("/web/invoices/{$invoice->crm_id}/pay")->assertSessionHas('error');
+
+        $this->assertSame(0, DB::table('payment_transactions')->count());
+        $this->viewApplication($application->crm_id)
+            ->assertJsonPath('props.awaitingSubmission', true)
+            ->assertJsonPath('props.invoices.0.payable', false);
+    }
+
+    public function test_ministry_cannot_submit_a_draft(): void
+    {
+        $this->asInstitution()->post('/web/applications', $this->applicationForm());
+        $id = DB::table('applications')->value('crm_id');
+
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'submit'])->assertSessionHas('error');
+
+        $this->assertSame('draft', $this->application($id)->workflow_stage);
+        $this->assertSame(0, DB::table('invoices')->count());
     }
 
     public function test_pay_renewal_application_fee(): void
@@ -113,8 +145,10 @@ class RedBoxWorkflowTest extends TestCase
         $this->asInstitution()->post('/web/applications', $this->applicationForm())->assertRedirect();
 
         $application = DB::table('applications')->first();
+        $this->asInstitution()->post("/web/applications/{$application->crm_id}/submit");
         $invoice = $this->invoice($application->crm_id, ApplicationFeeService::FEE_APPLICATION_RENEWAL);
         $this->assertEquals(config('eqa.fees.application_renewal'), $invoice->total_charges);
+        $this->assertSame('Renewal Application Fee (fixed): $'.number_format(config('eqa.fees.application_renewal'), 2), $invoice->description);
 
         $this->payOnline($invoice);
 
@@ -128,7 +162,7 @@ class RedBoxWorkflowTest extends TestCase
     {
         $this->asInstitution()->post('/web/applications', $this->applicationForm());
         $id = DB::table('applications')->value('crm_id');
-        // Non Express Pay option: submit now, pay by cheque.
+        // Submit first, then pay by cheque.
         $this->asInstitution()->post("/web/applications/{$id}/submit")->assertRedirect();
         DB::table('applications')->where('crm_id', $id)->update(['receipt_confirmation' => true]);
 
@@ -185,7 +219,6 @@ class RedBoxWorkflowTest extends TestCase
 
         $this->asMinistry()->post("/admin/applications/{$id}/advance", [
             'action' => 'approve',
-            'admin_fee' => 750,
             'compliance_order' => true,
             'compliance_order_notes' => 'Correct the refund policy within 60 days.',
         ])->assertSessionHas('success');
@@ -201,7 +234,7 @@ class RedBoxWorkflowTest extends TestCase
     {
         $id = $this->applicationAt('application_approval', 'Under Review');
 
-        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve', 'admin_fee' => 750])
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve'])
             ->assertSessionHas('success');
 
         $this->assertSame('Approved', $this->application($id)->status);
@@ -212,13 +245,20 @@ class RedBoxWorkflowTest extends TestCase
 
     public function test_generate_invoice_for_admin_variable_fee(): void
     {
+        config(['eqa.fees.multi_location' => 3000, 'eqa.fees.per_international_student' => 2]);
+        $this->institutionLocations(3);
         $id = $this->applicationAt('application_approval', 'Under Review');
 
-        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve', 'admin_fee' => 812.50]);
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve', 'admin_fee' => 1]);
 
         $invoice = $this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE);
         $this->assertNotNull($invoice);
-        $this->assertEquals(812.50, $invoice->total_charges);
+        $this->assertEquals(3200, $invoice->total_charges, 'Multiple location fee + 100 study permit students x $2 ("other" not charged); staff cannot override.');
+        $this->assertSame(
+            "Multiple Location Fee (private institution, 3 active locations): \$3,000.00\nInternational Student Fee (study permit students): 100 x \$2.00 = \$200.00",
+            $invoice->description,
+        );
+        $this->assertSame(['multi_location', 'international_students'], array_column(json_decode($invoice->line_items, true), 'code'));
         $this->assertSame('Unpaid', $invoice->invoice_status);
         $this->assertSame(Carbon::now('America/Vancouver')->addDays(30)->toDateString(), $invoice->due_date);
         // Designation waits for the fee.
@@ -226,10 +266,44 @@ class RedBoxWorkflowTest extends TestCase
         $this->assertNotified('application_approved_fee_due', $invoice->invoice_number);
     }
 
+    public function test_admin_fee_has_no_multiple_location_fee_for_public_or_single_location_institutions(): void
+    {
+        config(['eqa.fees.per_international_student' => 2]);
+        $this->institutionLocations(1);
+        $single = $this->applicationAt('application_approval', 'Under Review');
+        $this->asMinistry()->post("/admin/applications/{$single}/advance", ['action' => 'approve']);
+
+        $invoice = $this->invoice($single, ApplicationFeeService::FEE_ADMIN_VARIABLE);
+        $this->assertEquals(200, $invoice->total_charges);
+        $this->assertStringContainsString('Multiple Location Fee not applied (private institution, 1 active location)', $invoice->description);
+
+        $this->institutionLocations(2, ApplicationFeeService::PUBLIC_QA_MET_THROUGH);
+        $quote = app(ApplicationFeeService::class)->adminFeeQuote($this->application($single));
+        $this->assertEquals(200, $quote['amount']);
+        $this->assertStringContainsString('Multiple Location Fee not applied (public institution)', $quote['description']);
+    }
+
+    public function test_no_admin_fee_due_designates_on_approval(): void
+    {
+        $this->institutionLocations(1, ApplicationFeeService::PUBLIC_QA_MET_THROUGH);
+        $id = $this->applicationAt('application_approval', 'Under Review');
+        DB::table('applications')->where('crm_id', $id)->update(['intl_students_permit' => 0]);
+
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve'])->assertSessionHas('success');
+
+        $invoice = $this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE);
+        $this->assertEquals(0, $invoice->total_charges);
+        $this->assertSame('Paid', $invoice->invoice_status);
+        $this->assertSame('No Charge', $invoice->payment_method);
+        $this->assertStringContainsString('International Student Fee not applied (0 study permit students)', $invoice->description);
+        $this->assertSame('end', $this->application($id)->workflow_stage);
+        $this->assertSame('Designated', DB::table('institutions')->where('crm_id', self::INSTITUTION)->value('eqa_status'));
+    }
+
     public function test_inst_pays_admin_variable_fee(): void
     {
         $id = $this->applicationAt('application_approval', 'Under Review');
-        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve', 'admin_fee' => 500]);
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve']);
 
         $this->payOnline($this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE));
 
@@ -242,7 +316,7 @@ class RedBoxWorkflowTest extends TestCase
     public function test_inst_does_not_pay_admin_variable_fee_expires(): void
     {
         $id = $this->applicationAt('application_approval', 'Under Review');
-        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve', 'admin_fee' => 500]);
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve']);
 
         $this->travel(31)->days();
         $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
@@ -275,6 +349,7 @@ class RedBoxWorkflowTest extends TestCase
         $invoice = $this->invoice($id, ApplicationFeeService::FEE_APPEAL);
         $this->assertSame('Pending Appeal', $application->status);
         $this->assertEquals(config('eqa.fees.appeal'), $invoice->total_charges);
+        $this->assertSame('Appeal Fee (fixed): $'.number_format(config('eqa.fees.appeal'), 2), $invoice->description);
 
         $this->payOnline($invoice);
 
@@ -303,7 +378,6 @@ class RedBoxWorkflowTest extends TestCase
 
         $this->asMinistry()->post("/admin/applications/{$id}/advance", [
             'action' => 'approve',
-            'admin_fee' => 500,
             'compliance_order' => true,
             'compliance_order_notes' => 'Quarterly reporting for one year.',
         ]);
@@ -397,9 +471,21 @@ class RedBoxWorkflowTest extends TestCase
             'institution_name' => 'Red Box College',
             'application_date' => Carbon::now()->toDateString(),
             'fees_payment_received' => true,
+            'intl_students_permit' => 100,
+            'intl_students_other' => 25,
         ]);
 
         return $id;
+    }
+
+    /** Private institution (any QA pathway but public legislation) with the given number of active locations. */
+    private function institutionLocations(int $active, string $qaMetThrough = 'Languages Canada Accreditation'): void
+    {
+        DB::table('institutions')->where('crm_id', self::INSTITUTION)->update(['qa_met_through' => $qaMetThrough]);
+        for ($i = 0; $i < $active; $i++) {
+            DB::table('campuses')->insert(['crm_id' => (string) Str::uuid(), 'institution_crm_id' => self::INSTITUTION, 'name' => 'Campus '.$i, 'status' => 'Active']);
+        }
+        DB::table('campuses')->insert(['crm_id' => (string) Str::uuid(), 'institution_crm_id' => self::INSTITUTION, 'name' => 'Closed campus', 'status' => 'Inactive']);
     }
 
     private function viewApplication(string $id)

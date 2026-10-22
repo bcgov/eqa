@@ -1,15 +1,16 @@
 <?php
 
 // EQA fees and deadlines for the payment / appeal workflow.
-// PLACEHOLDER values until the ministry confirms the real amounts and windows.
+// Deadlines are PLACEHOLDER values until the ministry confirms the windows.
 return [
 
     'fees' => [
-        'application_new' => (float) env('EQA_FEE_APPLICATION_NEW', 1000),
-        'application_renewal' => (float) env('EQA_FEE_APPLICATION_RENEWAL', 500),
-        'appeal' => (float) env('EQA_FEE_APPEAL', 250),
-        // Suggested default; the ministry enters the actual admin variable fee at approval.
-        'admin_variable' => (float) env('EQA_FEE_ADMIN_VARIABLE', 500),
+        'application_new' => (float) env('APPLICATION_NEW_FEE', 7500),
+        'application_renewal' => (float) env('APPLICATION_RENEWAL_FEE', 5500),
+        'appeal' => (float) env('APPLICATION_APPEAL_FEE', 250),
+        // Administrative fee components: private institutions with more than one active location, plus per international student.
+        'multi_location' => (float) env('APPLICATION_MULTI_LOCATION_FEE', 3000),
+        'per_international_student' => (float) env('APPLICATION_PER_INTERNATIONAL_STUDENT_FEE', 2),
     ],
 
     'deadlines' => [

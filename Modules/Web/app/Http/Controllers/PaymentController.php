@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
+use Modules\Admin\Services\ApplicationFeeService;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 /**
@@ -37,7 +38,7 @@ class PaymentController extends Controller
                 ->get()
                 ->map(function (object $invoice): object {
                     $invoice->amount_due = $this->expressPay->amountDue($invoice);
-                    $invoice->payable = $this->expressPay->isPayable($invoice);
+                    $invoice->payable = $this->expressPay->isPayable($invoice) && ! $this->awaitingSubmission($invoice);
                     $invoice->payment_under_review = $this->expressPay->hasPaymentUnderReview((string) $invoice->crm_id);
 
                     return $invoice;
@@ -62,6 +63,9 @@ class PaymentController extends Controller
             ->where('institution_crm_id', $institution->crm_id)
             ->first();
         abort_if($invoice === null, 404);
+        if ($this->awaitingSubmission($invoice)) {
+            return back()->with('error', 'Submit the application before paying its fee.');
+        }
 
         // Settle earlier attempts first so an in-flight or already-approved payment is not duplicated.
         $open = DB::table('payment_transactions')
@@ -123,6 +127,15 @@ class PaymentController extends Controller
         };
 
         return redirect($returnTo)->with($level, $message);
+    }
+
+    private function awaitingSubmission(object $invoice): bool
+    {
+        $application = $invoice->application_crm_id
+            ? DB::table('applications')->where('crm_id', $invoice->application_crm_id)->first()
+            : null;
+
+        return $application !== null && app(ApplicationFeeService::class)->awaitingSubmission($application);
     }
 
     private function canPay(Request $request): bool

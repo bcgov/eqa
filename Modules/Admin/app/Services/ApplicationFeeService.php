@@ -25,6 +25,9 @@ class ApplicationFeeService
 
     public const APPLICATION_FEES = [self::FEE_APPLICATION_NEW, self::FEE_APPLICATION_RENEWAL];
 
+    /** The only QA Met Through pathway that is not a private institution (no multiple location fee). */
+    public const PUBLIC_QA_MET_THROUGH = 'Public Institution Legislation';
+
     public function __construct(
         private readonly ProcessNotifier $notifier,
         private readonly DesignationService $designation,
@@ -46,7 +49,8 @@ class ApplicationFeeService
         return $max + 1;
     }
 
-    public function createInvoice(object $application, string $feeType, float $amount, ?string $dueDate = null): object
+    /** @param  list<array<string, mixed>>  $lineItems */
+    public function createInvoice(object $application, string $feeType, float $amount, ?string $dueDate = null, ?string $description = null, array $lineItems = []): object
     {
         $crmId = (string) Str::uuid();
         $amount = round($amount, 2);
@@ -67,9 +71,98 @@ class ApplicationFeeService
             'status' => 'Active',
             'fee_type' => $feeType,
             'due_date' => $dueDate,
+            'description' => $description,
+            'line_items' => $lineItems !== [] ? json_encode($lineItems) : null,
         ]);
 
         return DB::table('invoices')->where('crm_id', $crmId)->first();
+    }
+
+    /** @param  array{amount: float, description: string, line_items: list<array<string, mixed>>}  $quote */
+    private function createQuotedInvoice(object $application, string $feeType, array $quote, ?string $dueDate = null): object
+    {
+        return $this->createInvoice($application, $feeType, $quote['amount'], $dueDate, $quote['description'], $quote['line_items']);
+    }
+
+    /** @return array{amount: float, description: string, line_items: list<array<string, mixed>>} */
+    public function applicationFeeQuote(string $feeType): array
+    {
+        $label = $feeType === self::FEE_APPLICATION_RENEWAL ? 'Renewal Application Fee' : 'New Application Fee';
+
+        return $this->quote([$this->line($feeType, $label.' (fixed)', 1, (float) config('eqa.fees.'.$feeType))]);
+    }
+
+    /** @return array{amount: float, description: string, line_items: list<array<string, mixed>>} */
+    public function appealFeeQuote(): array
+    {
+        return $this->quote([$this->line(self::FEE_APPEAL, 'Appeal Fee (fixed)', 1, (float) config('eqa.fees.appeal'))]);
+    }
+
+    /**
+     * Administrative fee: multiple location fee (private institutions with more than one active
+     * location) plus a per international student fee (study permit students, from the application).
+     *
+     * @return array{amount: float, description: string, line_items: list<array<string, mixed>>}
+     */
+    public function adminFeeQuote(object $application): array
+    {
+        $institution = $this->institution($application);
+        $qaMetThrough = trim((string) ($institution->qa_met_through ?? ''));
+        $private = $qaMetThrough !== self::PUBLIC_QA_MET_THROUGH;
+        $locations = $institution !== null
+            ? DB::table('campuses')->where('institution_crm_id', $institution->crm_id)->where('status', 'Active')->count()
+            : 0;
+        $permit = (int) ($application->intl_students_permit ?? 0);
+        $locationText = $locations.' active location'.($locations === 1 ? '' : 's');
+
+        $lines = [];
+        $notes = [];
+        if ($private && $locations > 1) {
+            $lines[] = $this->line('multi_location', 'Multiple Location Fee (private institution, '.$locationText.')', 1, (float) config('eqa.fees.multi_location'));
+        } else {
+            $notes[] = 'Multiple Location Fee not applied ('.($private ? 'private institution, '.$locationText : 'public institution').')';
+        }
+        if ($permit > 0) {
+            $lines[] = $this->line('international_students', 'International Student Fee (study permit students)', $permit, (float) config('eqa.fees.per_international_student'));
+        } else {
+            $notes[] = 'International Student Fee not applied (0 study permit students)';
+        }
+
+        return $this->quote($lines, $notes);
+    }
+
+    /** @return array<string, mixed> */
+    private function line(string $code, string $label, int $quantity, float $unitPrice): array
+    {
+        return [
+            'code' => $code,
+            'label' => $label,
+            'quantity' => $quantity,
+            'unit_price' => round($unitPrice, 2),
+            'amount' => round($quantity * $unitPrice, 2),
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $lines
+     * @param  list<string>  $notes
+     * @return array{amount: float, description: string, line_items: list<array<string, mixed>>}
+     */
+    private function quote(array $lines, array $notes = []): array
+    {
+        $money = static fn (float $v): string => '$'.number_format($v, 2);
+        $text = array_map(
+            fn (array $l): string => $l['quantity'] === 1
+                ? $l['label'].': '.$money($l['amount'])
+                : $l['label'].': '.$l['quantity'].' x '.$money($l['unit_price']).' = '.$money($l['amount']),
+            $lines,
+        );
+
+        return [
+            'amount' => round(array_sum(array_column($lines, 'amount')), 2),
+            'description' => implode("\n", array_merge($text, $notes)),
+            'line_items' => $lines,
+        ];
     }
 
     /** @param  string|array<int, string>  $feeTypes */
@@ -170,13 +263,32 @@ class ApplicationFeeService
         ]);
 
         $institution = $this->institution($application);
+        $feeInvoice = $this->invoiceFor($application->crm_id, self::APPLICATION_FEES)
+            ?? $this->createApplicationFeeInvoice($application, $institution);
         if ($institution !== null) {
-            $feeInvoice = $this->invoiceFor($application->crm_id, self::APPLICATION_FEES);
-            $isRenewal = $feeInvoice !== null
-                ? $feeInvoice->fee_type === self::FEE_APPLICATION_RENEWAL
-                : $this->notifier->isReapplication($institution);
-            $this->notifier->applicationSubmitted($institution, (string) $application->reference, $isRenewal);
+            $this->notifier->applicationSubmitted($institution, (string) $application->reference, $feeInvoice->fee_type === self::FEE_APPLICATION_RENEWAL);
         }
+    }
+
+    /** A draft that has never been submitted: no fees are requested until it is. */
+    public function awaitingSubmission(object $application): bool
+    {
+        return ($application->workflow_stage ?? null) === 'draft' && ! $this->truthy($application->need_additional_details ?? null);
+    }
+
+    private function createApplicationFeeInvoice(object $application, ?object $institution): object
+    {
+        $feeType = $institution !== null && $this->notifier->isReapplication($institution)
+            ? self::FEE_APPLICATION_RENEWAL
+            : self::FEE_APPLICATION_NEW;
+        $quote = $this->applicationFeeQuote($feeType);
+
+        DB::table('applications')->where('crm_id', $application->crm_id)->update([
+            'application_fee' => $quote['amount'],
+            'total_due' => $quote['amount'],
+        ]);
+
+        return $this->createQuotedInvoice($application, $feeType, $quote);
     }
 
     /** Ministry reopens an incomplete application so the institution can supply missing information. */
@@ -198,11 +310,12 @@ class ApplicationFeeService
         }
     }
 
-    /** Approval (optionally under a compliance order): raise the admin variable fee invoice and send the decision. */
-    public function approve(object $application, float $adminFee, bool $complianceOrder, string $complianceNotes): object
+    /** Approval (optionally under a compliance order): raise the administrative fee invoice and send the decision. */
+    public function approve(object $application, bool $complianceOrder, string $complianceNotes): object
     {
         $today = $this->today();
         $due = Carbon::now('America/Vancouver')->addDays((int) config('eqa.deadlines.admin_fee_days', 30))->toDateString();
+        $quote = $this->adminFeeQuote($application);
 
         DB::table('applications')->where('crm_id', $application->crm_id)->update([
             'workflow_stage' => 'admin_fee',
@@ -215,7 +328,14 @@ class ApplicationFeeService
         ]);
 
         $application = DB::table('applications')->where('crm_id', $application->crm_id)->first();
-        $invoice = $this->createInvoice($application, self::FEE_ADMIN_VARIABLE, $adminFee, $due);
+        $invoice = $this->createQuotedInvoice($application, self::FEE_ADMIN_VARIABLE, $quote, $due);
+
+        // Nothing to pay (e.g. public institution, no international students): designate now.
+        if ($quote['amount'] <= 0) {
+            $this->recordManualPayment($invoice, 'No Charge');
+
+            return DB::table('invoices')->where('crm_id', $invoice->crm_id)->first();
+        }
 
         $institution = $this->institution($application);
         if ($institution !== null) {
@@ -242,7 +362,7 @@ class ApplicationFeeService
             'status' => 'Pending Appeal',
         ]);
 
-        return $this->createInvoice($application, self::FEE_APPEAL, (float) config('eqa.fees.appeal'), (string) $application->appeal_deadline);
+        return $this->createQuotedInvoice($application, self::FEE_APPEAL, $this->appealFeeQuote(), (string) $application->appeal_deadline);
     }
 
     /** Appeal upheld: the decline stands (status Declined). */

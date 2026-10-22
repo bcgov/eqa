@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 use Modules\Admin\Models\Application;
+use Modules\Admin\Services\ApplicationFeeService;
 
 /**
  * Ministry (IDIR) view over migrated EQA designation applications: a paginated,
@@ -79,7 +80,7 @@ class ApplicationController extends Controller
             'invoice' => $application->invoice,
             'invoices' => DB::table('invoices')->where('application_crm_id', $crmId)->orderBy('invoice_number')->get()
                 ->each(fn (object $invoice) => $invoice->payment_under_review = app(ExpressPayService::class)->hasPaymentUnderReview((string) $invoice->crm_id)),
-            'adminFeeDefault' => (float) config('eqa.fees.admin_variable'),
+            'adminFeeQuote' => app(ApplicationFeeService::class)->adminFeeQuote(DB::table('applications')->where('crm_id', $crmId)->first()),
             'qaMetThrough' => $qaMetThrough,
         ]);
     }

@@ -41,7 +41,7 @@ function sortBy(column) {
 const feeTypes = {
     application_new: { label: 'New Application Fee', class: 'bg-sky-100 text-sky-700' },
     application_renewal: { label: 'Renewal Application Fee', class: 'bg-teal-100 text-teal-700' },
-    admin_variable: { label: 'Application Admin Fee', class: 'bg-purple-100 text-purple-700' },
+    admin_variable: { label: 'Administrative Fee', class: 'bg-purple-100 text-purple-700' },
     appeal: { label: 'Appeal Fee', class: 'bg-rose-100 text-rose-700' },
 }
 

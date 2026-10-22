@@ -6,7 +6,7 @@ const props = defineProps({
     application: { type: Object, default: () => ({}) },
     invoice: { type: Object, default: null },
     invoices: { type: Array, default: () => [] },
-    adminFeeDefault: { type: Number, default: 0 },
+    adminFeeQuote: { type: Object, default: () => ({ amount: 0, description: '' }) },
     qaMetThrough: { type: String, default: null },
 })
 
@@ -50,10 +50,12 @@ const reasons = ref(props.application.non_approval_reasons || '')
 const changes = ref('')
 const complianceOrder = ref(false)
 const complianceNotes = ref('')
-const adminFee = ref(props.adminFeeDefault || null)
-const approval = () => ({ admin_fee: adminFee.value, compliance_order: complianceOrder.value, compliance_order_notes: complianceNotes.value })
-const feeLabels = { application_new: 'New Application Fee', application_renewal: 'Renewal Application Fee', admin_variable: 'Admin Variable Fee', appeal: 'Appeal Fee' }
+const approval = () => ({ compliance_order: complianceOrder.value, compliance_order_notes: complianceNotes.value })
+const feeLabels = { application_new: 'New Application Fee', application_renewal: 'Renewal Application Fee', admin_variable: 'Administrative Fee', appeal: 'Appeal Fee' }
 const applicationFeeInvoice = computed(() => props.invoices.find((i) => ['application_new', 'application_renewal'].includes(i.fee_type)) || null)
+const invoicedTotal = computed(() => props.invoices.length
+    ? props.invoices.reduce((sum, i) => sum + Number(i.total_charges || 0), 0)
+    : props.application.total_due)
 const busy = ref(false)
 
 const truthy = (v) => v === true || v === 't' || v === 1 || v === '1'
@@ -107,11 +109,9 @@ const form = useForm({
     affirm_understands_comply: truthy(a.affirm_understands_comply),
     affirm_authorized: truthy(a.affirm_authorized),
     representative_signature: a.representative_signature ?? '',
-    application_fee: a.application_fee ?? '',
-    annual_designation_fee: a.annual_designation_fee ?? '',
 })
 
-const dateFields = ['review_completion_date', 'suitability_review_date', 'resubmission_date', 'approved_date', 'designation_expiry', 'not_approved_date', 'eligibility', 'application_fee', 'annual_designation_fee']
+const dateFields = ['review_completion_date', 'suitability_review_date', 'resubmission_date', 'approved_date', 'designation_expiry', 'not_approved_date', 'eligibility']
 
 function save() {
     form.transform((data) => {
@@ -187,6 +187,7 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
                 <Link v-if="inv.payment_under_review" :href="`/admin/invoices/${inv.crm_id}`" class="ml-1 rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 hover:underline">Online payment needs review</Link>
             </p>
             <a v-if="inv.invoice_status === 'Paid'" :href="`/admin/invoices/${inv.crm_id}/receipt`" class="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100">Download Order Receipt</a>
+            <p v-if="inv.description" class="w-full whitespace-pre-line text-xs text-slate-500">{{ inv.description }}</p>
         </div>
     </div>
 
@@ -199,8 +200,8 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
         <h2 class="mb-3 text-sm font-semibold text-indigo-900">Next step</h2>
 
         <div v-if="stage === 'draft'">
-            <p class="mb-3 text-sm text-slate-600">The application is a draft. Submit it to begin the review process.</p>
-            <button :disabled="busy" @click="advance('submit')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Submit for Review →</button>
+            <p v-if="application.need_additional_details" class="text-sm text-slate-600">Reopened for changes. Waiting for the institution to resubmit by {{ application.changes_due_date || '—' }}.</p>
+            <p v-else class="text-sm text-slate-600">The application is a draft. The institution must submit it before the review process begins.</p>
         </div>
 
         <div v-else-if="stage === 'pending_review'">
@@ -245,13 +246,15 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
         <div v-else-if="stage === 'application_approval' || stage === 'suitability_review'">
             <p class="mb-3 text-sm text-slate-600">
                 {{ stage === 'suitability_review' ? 'Complete the suitability review and record the outcome.' : 'Eligibility met. Record the approval decision.' }}
-                Approving raises the admin variable fee invoice; designation is granted once it is paid.
+                Approving raises the administrative fee invoice; designation is granted once it is paid.
             </p>
+            <div class="mb-4 rounded-md border border-slate-200 bg-white p-3 text-sm">
+                <div class="flex justify-between font-medium text-slate-800"><span>Administrative Fee</span><span>{{ money(adminFeeQuote.amount) }}</span></div>
+                <p class="mt-1 whitespace-pre-line text-xs text-slate-500">{{ adminFeeQuote.description }}</p>
+                <p v-if="!(adminFeeQuote.amount > 0)" class="mt-1 text-xs text-slate-500">No fee applies; approving grants the designation immediately.</p>
+            </div>
             <div class="mb-4 grid gap-3 sm:grid-cols-2">
-                <label class="block text-sm text-slate-700">Admin Variable Fee ($)
-                    <input v-model="adminFee" type="number" min="0.01" step="0.01" :class="inputClass" />
-                </label>
-                <label class="flex items-center gap-2 self-end text-sm text-slate-700"><input type="checkbox" v-model="complianceOrder" class="rounded"> Approve with compliance order</label>
+                <label class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" v-model="complianceOrder" class="rounded"> Approve with compliance order</label>
                 <label v-if="complianceOrder" class="block text-sm text-slate-700 sm:col-span-2">Compliance order details
                     <textarea v-model="complianceNotes" rows="2" :class="inputClass"></textarea>
                 </label>
@@ -266,7 +269,7 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
         </div>
 
         <div v-else-if="stage === 'admin_fee'">
-            <p class="mb-3 text-sm text-slate-600">Approved. Waiting for the institution to pay the admin variable fee. Confirm a payment received outside Express Pay to grant the designation.</p>
+            <p class="mb-3 text-sm text-slate-600">Approved. Waiting for the institution to pay the administrative fee. Confirm a payment received outside Express Pay to grant the designation.</p>
             <button :disabled="busy" @click="advance('confirm_admin_fee')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Confirm Admin Fee Payment →</button>
         </div>
 
@@ -375,16 +378,11 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
         <div class="grid gap-6 lg:grid-cols-2">
             <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <h2 class="mb-3 text-sm font-semibold text-slate-700">Financials</h2>
-                <div class="grid gap-3 text-sm sm:grid-cols-2">
-                    <label class="block"><span class="text-slate-500">Application Fee</span>
-                        <input type="number" step="0.01" min="0" v-model="form.application_fee" :disabled="locked" :class="inputClass" />
-                    </label>
-                    <label class="block"><span class="text-slate-500">Annual Designation Fee</span>
-                        <input type="number" step="0.01" min="0" v-model="form.annual_designation_fee" :disabled="locked" :class="inputClass" />
-                    </label>
-                    <div class="flex justify-between border-t border-slate-100 pt-2 sm:col-span-2"><span class="text-slate-500">Total Amount</span><span class="font-medium text-slate-800">{{ money(application.total_due) }}</span></div>
-                    <div class="flex justify-between sm:col-span-2"><span class="text-slate-500">Invoice Number</span><span class="text-slate-800">{{ application.invoice_number || '—' }}</span></div>
-                </div>
+                <dl class="divide-y divide-slate-100 text-sm">
+                    <div class="flex justify-between py-2"><dt class="text-slate-500">Application Fee</dt><dd class="text-slate-800">{{ money(applicationFeeInvoice ? applicationFeeInvoice.total_charges : application.application_fee) }}</dd></div>
+                    <div class="flex justify-between py-2"><dt class="text-slate-500">Total Amount</dt><dd class="font-medium text-slate-800">{{ money(invoicedTotal) }}</dd></div>
+                    <div class="flex justify-between py-2"><dt class="text-slate-500">Invoice Number</dt><dd class="text-slate-800">{{ applicationFeeInvoice?.invoice_number || application.invoice_number || '—' }}</dd></div>
+                </dl>
             </div>
 
             <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">

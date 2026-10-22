@@ -57,7 +57,9 @@ function pay(invoice) {
             </thead>
             <tbody class="divide-y divide-slate-100">
                 <tr v-for="i in invoices" :key="i.crm_id" class="hover:bg-slate-50">
-                    <td class="px-3 py-2 font-mono text-xs text-slate-600">{{ i.invoice_number || '—' }}</td>
+                    <td class="px-3 py-2 font-mono text-xs text-slate-600">{{ i.invoice_number || '—' }}
+                        <p v-if="i.description" class="whitespace-pre-line font-sans text-xs text-slate-500">{{ i.description }}</p>
+                    </td>
                     <td class="px-3 py-2 font-mono text-xs text-slate-600">{{ i.application_reference || '—' }}</td>
                     <td class="px-3 py-2 text-slate-600">{{ i.invoice_date || '—' }}</td>
                     <td class="px-3 py-2 text-right text-slate-600">{{ money(i.total_charges) }}</td>
