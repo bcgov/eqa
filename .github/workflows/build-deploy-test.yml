@@ -68,8 +68,9 @@ jobs:
     name: Deploy Project to TEST
     runs-on: ubuntu-latest
     if: github.ref_name == 'test'
-    needs:
-      - build
+    concurrency:
+      group: ${{ github.ref }}
+      cancel-in-progress: true
     env:
       BUILD_ID: ${{ github.event.number }}
       NAMESPACE: f40a2a-test
@@ -77,6 +78,8 @@ jobs:
       BUILD_REF: ${{ github.base_ref }}
       HOST_PREFIX: eqa
       SOURCE_REPOSITORY_BRANCH: test
+    needs:
+      - build
     steps:
       - name: Print env
         run: |
