@@ -14,25 +14,26 @@ objects:
           protocol: TCP
           targetPort: 8443
       selector:
-        deploymentconfig: ${NAME}
+        deployment: ${NAME}
       sessionAffinity: None
     metadata:
       name: ${NAME}
       labels:
-        deploymentconfig: ${NAME}
+        deployment: ${NAME}
   - apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: ${NAME}
       labels:
-        deploymentconfig: ${NAME}
+        deployment: ${NAME}
         app.kubernetes.io/part-of: ${LABEL_NAME}
 
     spec:
       replicas: ${{MIN_REPLICAS}}
       revisionHistoryLimit: 5
       selector:
-        deployment: ${NAME}
+        matchLabels:
+          deployment: ${NAME}
       strategy:
         type: RollingUpdate
       template:
@@ -61,7 +62,7 @@ objects:
                 name: subpath-env
           containers:
             - image: >-
-                image-registry.openshift-image-registry.svc:5000/${BUILD_NAMESPACE}/${NAME}
+                image-registry.openshift-image-registry.svc:5000/${BUILD_NAMESPACE}/${NAME}:${IMAGE_TAG}
               volumeMounts:
                 - name: site-data-volume
                   mountPath: /var/site_data
@@ -109,7 +110,7 @@ objects:
       name: ${JOB_NAME}
       namespace: ${NAMESPACE}
       labels:
-        template: 'nrsts-daily-cronjob'
+        template: 'eqa-daily-cronjob'
         cronjob: ${JOB_NAME}
         app.kubernetes.io/part-of: ${LABEL_NAME}
     spec:
@@ -120,7 +121,7 @@ objects:
       jobTemplate:
         metadata:
           labels:
-            template: 'nrsts-daily-cronjob'
+            template: 'eqa-daily-cronjob'
             cronjob: ${JOB_NAME}
         spec:
           backoffLimit: ${{JOB_BACKOFF_LIMIT}}
@@ -148,7 +149,7 @@ objects:
 
                       echo "==========> Starting schedule run"
 
-                      oc -n ${NAMESPACE} get pods -l deploymentconfig=${NAME} -o name | xargs -I {} sh -c 'oc exec -it {} -- php artisan job:dispatch-midnight && oc exec -it {} -- php artisan queue:work --once --queue=midnight'
+                      oc -n ${NAMESPACE} get pods -l deployment=${NAME} -o name | xargs -I {} sh -c 'oc exec -it {} -- php artisan job:dispatch-midnight && oc exec -it {} -- php artisan queue:work --once --queue=midnight'
 
                       echo "==========> Finished schedule run"
 
@@ -182,9 +183,9 @@ objects:
         deployment: ${NAME}
     spec:
       targetRef:
-        kind: DeploymentConfig
+        kind: Deployment
         name: ${NAME}
-        apiVersion: apps.openshift.io/v1
+        apiVersion: apps/v1
       updatePolicy:
         updateMode: "Off"
   - apiVersion: autoscaling/v1
@@ -195,8 +196,8 @@ objects:
       name: ${NAME}
     spec:
       scaleTargetRef:
-        apiVersion: apps.openshift.io/v1
-        kind: DeploymentConfig
+        apiVersion: apps/v1
+        kind: Deployment
         name: ${NAME}
       minReplicas: ${{MIN_REPLICAS}}
       maxReplicas: ${{MAX_REPLICAS}}
@@ -280,7 +281,7 @@ parameters:
   - name: 'JOB_NAME'
     displayName: 'Job Name'
     description: 'Name of the Scheduled Job to Create.'
-    value: 'nrsts-daily-cronjob'
+    value: 'eqa-daily-cronjob'
     required: true
   - name: 'SCHEDULE'
     displayName: 'Cron Schedule'

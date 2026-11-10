@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Modules\Admin\Models;
 
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * An EQA designation application, migrated from the legacy Dynamics
@@ -13,6 +15,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class Application extends Model
 {
+    /** Workflow stages that mean the application is still open (not finalized). */
+    public const ACTIVE_STAGES = [
+        'draft', 'pending_review', 'fees_payment', 'under_review', 'suitability_review', 'application_approval',
+        'not_approved', 'non_approval_reasons', 'admin_fee', 'appeal_payment', 'appeal_review',
+    ];
+
     protected $table = 'applications';
 
     protected $primaryKey = 'crm_id';
@@ -76,5 +84,16 @@ class Application extends Model
     public function institution(): BelongsTo
     {
         return $this->belongsTo(Institution::class, 'institution_crm_id', 'crm_id');
+    }
+
+    public function invoice(): HasOne
+    {
+        return $this->hasOne(Invoice::class, 'application_crm_id', 'crm_id');
+    }
+
+    // Migrated projection stores plain dates; keep them as Y-m-d when serialized.
+    protected function serializeDate(DateTimeInterface $date): string
+    {
+        return $date->format('Y-m-d');
     }
 }

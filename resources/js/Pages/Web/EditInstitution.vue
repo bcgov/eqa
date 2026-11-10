@@ -1,18 +1,36 @@
 <script setup>
 import { Head, Link, useForm } from '@inertiajs/vue3'
+import { computed } from 'vue'
+import InfoTooltip from '../../Components/InfoTooltip.vue'
 
 const props = defineProps({
     institution: { type: Object, default: null },
     qaOptions: { type: Array, default: () => [] },
     enrolmentTypes: { type: Array, default: () => [] },
+    canEditDli: { type: Boolean, default: false },
+    submitUrl: { type: String, default: '/web/institution' },
+    cancelUrl: { type: String, default: '/web/institution' },
 })
 
 const inputClass = 'mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none'
+
+// Backward compatible: keep whatever QA Met Through value is already stored on
+// the institution selectable even if it is a legacy label (e.g. the old
+// "Private Training Institutions Branch (PTIB) Designation") not in the option list.
+const qaOptionsWithCurrent = computed(() => {
+    const current = props.institution?.qa_met_through
+    const opts = [...props.qaOptions]
+    if (current && !opts.includes(current)) {
+        opts.push(current)
+    }
+    return opts
+})
 
 const form = useForm({
     name: props.institution?.name ?? '',
     legal_name: props.institution?.legal_name ?? '',
     bc_incorporation_number: props.institution?.bc_incorporation_number ?? '',
+    dli_number: props.institution?.dli_number ?? '',
     qa_met_through: props.institution?.qa_met_through ?? '',
     website: props.institution?.website ?? '',
     street1: props.institution?.street1 ?? '',
@@ -30,7 +48,7 @@ const form = useForm({
 })
 
 function submit() {
-    form.put('/web/institution')
+    form.put(props.submitUrl)
 }
 </script>
 
@@ -38,7 +56,7 @@ function submit() {
     <Head title="Edit Institution" />
 
     <div class="mb-4">
-        <Link href="/web/institution" class="text-sm text-indigo-600 hover:underline">← Institution</Link>
+        <Link :href="cancelUrl" class="text-sm text-indigo-600 hover:underline">← Back</Link>
     </div>
 
     <h1 class="text-2xl font-bold text-slate-800">Edit Institution Details</h1>
@@ -58,10 +76,14 @@ function submit() {
                 <label class="block"><span class="text-sm text-slate-600">BC Incorporation Number</span>
                     <input v-model="form.bc_incorporation_number" type="text" :class="inputClass" />
                 </label>
+                <label v-if="canEditDli" class="block"><span class="text-sm text-slate-600">DLI Number</span>
+                    <input v-model="form.dli_number" type="text" :class="inputClass" placeholder="e.g. O19023456789" />
+                    <span class="mt-1 block text-xs text-slate-400">Designated Learning Institution number (managed by the Ministry).</span>
+                </label>
                 <label class="block"><span class="text-sm text-slate-600">Quality Assurance Met Through</span>
                     <select v-model="form.qa_met_through" :class="inputClass">
                         <option value="">—</option>
-                        <option v-for="o in qaOptions" :key="o" :value="o">{{ o }}</option>
+                        <option v-for="o in qaOptionsWithCurrent" :key="o" :value="o">{{ o }}</option>
                     </select>
                 </label>
                 <label class="block"><span class="text-sm text-slate-600">Web URL</span>
@@ -98,6 +120,7 @@ function submit() {
             <h2 class="mb-4 text-sm font-semibold text-slate-700">Student Enrolment Information</h2>
             <div class="grid gap-4 sm:grid-cols-2">
                 <label class="block"><span class="text-sm text-slate-600">Total Institution Enrolment</span>
+                    <InfoTooltip class="ml-1" title="Total Institution Enrolment" text="Total Institution Enrolment includes all students (domestic and international) in all programs at the institution over the past 12 months." />
                     <input v-model="form.total_enrolment" type="number" min="0" :class="inputClass" />
                 </label>
                 <label class="block"><span class="text-sm text-slate-600">Enrolment Type</span>
@@ -112,6 +135,7 @@ function submit() {
                     <input v-model="form.intl_students_other" type="number" min="0" :class="inputClass" />
                 </label>
                 <label class="block"><span class="text-sm text-slate-600">Total Number of In-Person Students</span>
+                    <InfoTooltip class="ml-1" title="Total Number of In-Person Students" text="Include the number of students enrolled in a program where either 100% of the hours of instruction are delivered in-person or a combination of in-person and online delivery." />
                     <input v-model="form.in_person_students" type="number" min="0" :class="inputClass" />
                 </label>
                 <label class="block"><span class="text-sm text-slate-600">Total Number of Online Students</span>
@@ -122,7 +146,7 @@ function submit() {
 
         <div class="flex gap-2">
             <button type="submit" :disabled="form.processing" class="rounded-md bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">Save Changes</button>
-            <Link href="/web/institution" class="rounded-md border border-slate-300 px-5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</Link>
+            <Link :href="cancelUrl" class="rounded-md border border-slate-300 px-5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</Link>
         </div>
     </form>
 </template>

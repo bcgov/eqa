@@ -115,4 +115,8 @@ return [
         'name' => env('MAIL_FROM_NAME', env('APP_NAME', 'Laravel')),
     ],
 
+    // Non-prod: while the email master switch is OFF, notifications are diverted here
+    // unless a testing address is saved on the admin Email Templates page.
+    'testing_address' => env('TESTING_EMAIL_ADDRESS'),
+
 ];

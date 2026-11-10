@@ -5,13 +5,20 @@ declare(strict_types=1);
 namespace Modules\Web\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\Role;
+use App\Models\User;
+use App\Services\ExpressPayService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
+use Modules\Admin\Models\Application;
+use Modules\Admin\Services\ApplicationFeeService;
+use Modules\Admin\Services\ProcessNotifier;
 
 /**
  * The institution (BCeID) web portal: an institution views its own profile
@@ -42,6 +49,15 @@ class WebPortalController extends Controller
             ->get();
     }
 
+    private function hasActiveApplication(object $institution): bool
+    {
+        return DB::getSchemaBuilder()->hasTable('applications')
+            && DB::table('applications')
+                ->where('institution_crm_id', $institution->crm_id)
+                ->whereIn('workflow_stage', Application::ACTIVE_STAGES)
+                ->exists();
+    }
+
     private function campusesFor(?object $institution)
     {
         if ($institution === null || ! DB::getSchemaBuilder()->hasTable('campuses')) {
@@ -61,10 +77,73 @@ class WebPortalController extends Controller
             return collect();
         }
 
-        return DB::table('institution_users')
+        $contacts = DB::table('institution_users')
             ->where('institution_crm_id', $institution->crm_id)
             ->orderBy('full_name')
             ->get();
+
+        $guids = $contacts->pluck('bceid_user_guid')->filter()->map(fn ($g) => Str::lower($g))->all();
+        $emails = $contacts->pluck('email')->filter()->map(fn ($e) => Str::lower($e))->all();
+
+        $accounts = ($guids === [] && $emails === [])
+            ? collect()
+            : User::with('roles')
+                ->where(function ($q) use ($guids, $emails): void {
+                    if ($guids !== []) {
+                        $q->orWhereIn(DB::raw('lower(bceid_user_guid)'), $guids);
+                    }
+                    if ($emails !== []) {
+                        $q->orWhereIn(DB::raw('lower(email)'), $emails);
+                    }
+                })
+                ->get();
+
+        return $contacts->map(function (object $contact) use ($accounts) {
+            $account = $accounts->first(fn (User $u) => $this->accountMatchesContact($u, $contact));
+            $roles = $account ? $account->roles->pluck('name') : collect();
+
+            $contact->user_id = $account?->id;
+            $contact->access_type = $account === null ? null
+                : ($roles->contains(Role::INSTITUTION_ADMIN) ? 'Admin'
+                    : ($roles->contains(Role::INSTITUTION_GUEST) ? 'Guest' : 'User'));
+            $contact->account_disabled = $account ? (bool) $account->disabled : null;
+
+            return $contact;
+        });
+    }
+
+    /** Does this BCeID account correspond to the given institution contact? */
+    private function accountMatchesContact(User $user, object $contact): bool
+    {
+        if (! empty($contact->bceid_user_guid) && ! empty($user->bceid_user_guid)
+            && Str::lower($user->bceid_user_guid) === Str::lower($contact->bceid_user_guid)) {
+            return true;
+        }
+
+        if (! empty($contact->bceid_username) && ! empty($user->bceid_username)
+            && Str::upper($user->bceid_username) === Str::upper($contact->bceid_username)) {
+            return true;
+        }
+
+        $contactHasBceid = ! empty($contact->bceid_username) || ! empty($contact->bceid_user_guid);
+        $userHasBceid = ! empty($user->bceid_username) || ! empty($user->bceid_user_guid);
+
+        return ! $contactHasBceid && ! $userHasBceid
+            && ! empty($contact->email) && ! empty($user->email)
+            && Str::lower($user->email) === Str::lower($contact->email);
+    }
+
+    /** Guard: the target account must be one of this institution's contacts. */
+    private function accountBelongsToInstitution(User $user, object $institution): bool
+    {
+        if (! DB::getSchemaBuilder()->hasTable('institution_users')) {
+            return false;
+        }
+
+        return DB::table('institution_users')
+            ->where('institution_crm_id', $institution->crm_id)
+            ->get()
+            ->contains(fn (object $contact) => $this->accountMatchesContact($user, $contact));
     }
 
     public function home(Request $request): Response
@@ -84,17 +163,37 @@ class WebPortalController extends Controller
         return Inertia::render('Web/Applications', [
             'institution' => $institution,
             'applications' => $this->applicationsFor($institution),
+            'hasActiveApplication' => $institution !== null && $this->hasActiveApplication($institution),
         ]);
     }
 
     public function show(Request $request, string $crmId): Response
     {
-        $application = DB::table('applications')->where('crm_id', $crmId)->first();
-        abort_if($application === null, 404);
+        $institution = $this->institution($request);
+        $application = $this->ownApplication($request, $crmId);
+        $expressPay = app(ExpressPayService::class);
+        $fees = app(ApplicationFeeService::class);
+
+        $invoices = DB::table('invoices')
+            ->where('application_crm_id', $application->crm_id)
+            ->orderBy('invoice_number')
+            ->get()
+            ->map(function (object $invoice) use ($expressPay, $fees, $application): object {
+                $invoice->amount_due = $expressPay->amountDue($invoice);
+                $invoice->payable = $expressPay->isPayable($invoice) && ! $fees->awaitingSubmission($application);
+                $invoice->payment_under_review = $expressPay->hasPaymentUnderReview((string) $invoice->crm_id);
+
+                return $invoice;
+            });
 
         return Inertia::render('Web/ViewApplication', [
-            'institution' => $this->institution($request),
+            'institution' => $institution,
             'application' => $application,
+            'invoices' => $invoices,
+            'canPayOnline' => $expressPay->canUserPay($request->user(), $request->session()->has('impersonator_id')),
+            'canEdit' => $application->status === 'Draft',
+            'canAppeal' => $fees->canAppeal($application),
+            'awaitingSubmission' => $fees->awaitingSubmission($application),
         ]);
     }
 
@@ -153,6 +252,8 @@ class WebPortalController extends Controller
         ]);
 
         DB::table('institutions')->where('crm_id', $institution->crm_id)->update($data);
+
+        app(ProcessNotifier::class)->institutionChanged($institution, $data, $this->portalActor($institution));
 
         return redirect('/web/institution')->with('success', 'Institution details updated.');
     }
@@ -220,6 +321,8 @@ class WebPortalController extends Controller
             'institution_name' => $institution->name,
         ]));
 
+        app(ProcessNotifier::class)->campusCreated($data, (string) $institution->name, $institution->crm_id, $this->portalActor($institution));
+
         return redirect('/web/campuses')->with('success', 'Campus '.$data['location_name'].' added.');
     }
 
@@ -235,6 +338,8 @@ class WebPortalController extends Controller
         }
 
         DB::table('campuses')->where('crm_id', $crmId)->update($data);
+
+        app(ProcessNotifier::class)->campusChanged($campus, $data, $this->portalActor($this->institution($request)));
 
         return redirect('/web/campuses')->with('success', 'Campus '.$data['location_name'].' updated.');
     }
@@ -355,6 +460,8 @@ class WebPortalController extends Controller
             'institution_name' => $institution->name,
         ]));
 
+        app(ProcessNotifier::class)->dbaCreated($data, (string) $institution->name, $institution->crm_id, $this->portalActor($institution));
+
         return redirect('/web/dbas')->with('success', 'DBA '.$data['name'].' added.');
     }
 
@@ -365,6 +472,8 @@ class WebPortalController extends Controller
 
         $data = $this->validatedDba($request);
         DB::table('dbas')->where('crm_id', $crmId)->update($data);
+
+        app(ProcessNotifier::class)->dbaChanged($dba, $data, $this->portalActor($this->institution($request)));
 
         return redirect('/web/dbas')->with('success', 'DBA '.$data['name'].' updated.');
     }
@@ -412,122 +521,62 @@ class WebPortalController extends Controller
     public function users(Request $request): Response
     {
         $institution = $this->institution($request);
+        $currentUser = Auth::user();
 
         return Inertia::render('Web/Users', [
             'institution' => $institution,
             'users' => $this->usersFor($institution),
+            'canManage' => $currentUser !== null && $currentUser->hasAnyRole([Role::INSTITUTION_ADMIN, Role::SUPER_ADMIN]),
+            'currentUserId' => $currentUser?->id,
         ]);
     }
 
-    private function institutionUser(Request $request, string $crmId): ?object
+    /**
+     * Institution-admin only: switch a staff member's portal access role
+     * (Admin / User / Guest). Institution users cannot otherwise edit staff
+     * details, mirroring the FSG StaffList behaviour.
+     */
+    public function updateStaffRole(Request $request, int $userId): RedirectResponse
     {
         $institution = $this->institution($request);
+        abort_if($institution === null, 403);
 
-        if ($institution === null || ! DB::getSchemaBuilder()->hasTable('institution_users')) {
-            return null;
+        $actor = Auth::user();
+        abort_unless($actor !== null && $actor->hasAnyRole([Role::INSTITUTION_ADMIN, Role::SUPER_ADMIN]), 403);
+
+        // An admin cannot change their own role (prevents self lock-out).
+        abort_if($actor->id === $userId, 403);
+
+        $data = $request->validate(['role' => ['required', 'in:Admin,User,Guest']]);
+
+        $target = User::with('roles')->find($userId);
+        abort_if($target === null, 404);
+        abort_unless($this->accountBelongsToInstitution($target, $institution), 403);
+
+        $newRole = match ($data['role']) {
+            'Admin' => Role::INSTITUTION_ADMIN,
+            'User' => Role::INSTITUTION_USER,
+            default => Role::INSTITUTION_GUEST,
+        };
+
+        $role = Role::firstOrCreate(['name' => $newRole]);
+        $target->roles()->detach(
+            Role::whereIn('name', [Role::INSTITUTION_ADMIN, Role::INSTITUTION_USER, Role::INSTITUTION_GUEST])->pluck('id')
+        );
+        $target->roles()->attach($role->id);
+
+        return redirect('/web/users')->with('success', 'Staff role updated.');
+    }
+
+    public function create(Request $request): Response|RedirectResponse
+    {
+        $institution = $this->institution($request);
+        abort_if($institution === null, 403);
+
+        if ($this->hasActiveApplication($institution)) {
+            return redirect('/web/applications')
+                ->with('error', 'You already have an application that is submitted or under review. You cannot start a new one until it is finalized.');
         }
-
-        return DB::table('institution_users')
-            ->where('crm_id', $crmId)
-            ->where('institution_crm_id', $institution->crm_id)
-            ->first();
-    }
-
-    public function createUser(Request $request): Response
-    {
-        $institution = $this->institution($request);
-        abort_if($institution === null, 403);
-
-        return Inertia::render('Web/EditUser', [
-            'institution' => $institution,
-            'user' => null,
-        ]);
-    }
-
-    public function editUser(Request $request, string $crmId): Response
-    {
-        $user = $this->institutionUser($request, $crmId);
-        abort_if($user === null, 404);
-
-        return Inertia::render('Web/EditUser', [
-            'institution' => $this->institution($request),
-            'user' => $user,
-        ]);
-    }
-
-    public function storeUser(Request $request): RedirectResponse
-    {
-        $institution = $this->institution($request);
-        abort_if($institution === null, 403);
-
-        $data = $this->validatedUser($request);
-
-        DB::table('institution_users')->insert(array_merge($data, [
-            'crm_id' => (string) Str::uuid(),
-            'institution_crm_id' => $institution->crm_id,
-            'institution_name' => $institution->name,
-        ]));
-
-        return redirect('/web/users')->with('success', 'User '.($data['full_name'] ?? 'contact').' added.');
-    }
-
-    public function updateUser(Request $request, string $crmId): RedirectResponse
-    {
-        $user = $this->institutionUser($request, $crmId);
-        abort_if($user === null, 404);
-
-        $data = $this->validatedUser($request);
-
-        DB::table('institution_users')->where('crm_id', $crmId)->update($data);
-
-        return redirect('/web/users')->with('success', 'User '.($data['full_name'] ?? 'contact').' updated.');
-    }
-
-    /** @return array<string, mixed> */
-    private function validatedUser(Request $request): array
-    {
-        $data = $request->validate([
-            'first_name' => ['required', 'string', 'max:100'],
-            'last_name' => ['nullable', 'string', 'max:100'],
-            'job_title' => ['nullable', 'string', 'max:255'],
-            'email' => ['nullable', 'string', 'max:255'],
-            'phone' => ['nullable', 'string', 'max:50'],
-            'mobile' => ['nullable', 'string', 'max:50'],
-            'role' => ['nullable', 'string', 'max:50'],
-            'web_user_name' => ['nullable', 'string', 'max:255'],
-            'web_user_active' => ['boolean'],
-        ]);
-
-        $data['full_name'] = trim(($data['first_name'] ?? '').' '.($data['last_name'] ?? '')) ?: null;
-
-        return $data;
-    }
-
-    public function toggleUser(Request $request, string $crmId): RedirectResponse
-    {
-        $user = $this->institutionUser($request, $crmId);
-        abort_if($user === null, 404);
-
-        $active = ! ($user->web_user_active === true || $user->web_user_active === 't' || $user->web_user_active === 1 || $user->web_user_active === '1');
-        DB::table('institution_users')->where('crm_id', $crmId)->update(['web_user_active' => $active]);
-
-        return redirect('/web/users')->with('success', 'User '.($active ? 'reactivated' : 'deactivated').'.');
-    }
-
-    public function destroyUser(Request $request, string $crmId): RedirectResponse
-    {
-        $user = $this->institutionUser($request, $crmId);
-        abort_if($user === null, 404);
-
-        DB::table('institution_users')->where('crm_id', $crmId)->delete();
-
-        return redirect('/web/users')->with('success', 'User removed.');
-    }
-
-    public function create(Request $request): Response
-    {
-        $institution = $this->institution($request);
-        abort_if($institution === null, 403);
 
         return Inertia::render('Web/NewApplication', ['institution' => $institution]);
     }
@@ -537,31 +586,154 @@ class WebPortalController extends Controller
         $institution = $this->institution($request);
         abort_if($institution === null, 403);
 
-        $data = $request->validate([
-            'total_enrolment' => ['nullable', 'integer', 'min:0'],
-            'intl_students_permit' => ['nullable', 'integer', 'min:0'],
-            'intl_students_other' => ['nullable', 'integer', 'min:0'],
-            'in_person_students' => ['nullable', 'integer', 'min:0'],
-            'enrolment_type' => ['nullable', 'string', 'max:50'],
-        ]);
+        if ($this->hasActiveApplication($institution)) {
+            return redirect('/web/applications')
+                ->with('error', 'You already have an application that is submitted or under review. You cannot submit a new one until it is finalized.');
+        }
 
-        $maxNum = (int) DB::table('applications')
-            ->selectRaw("MAX(NULLIF(regexp_replace(reference, '[^0-9]', '', 'g'), '')::bigint) AS m")
-            ->value('m');
-        $reference = 'APP-'.str_pad((string) ($maxNum + 1), 8, '0', STR_PAD_LEFT);
+        $data = $this->validatedApplication($request);
+        $fees = app(ApplicationFeeService::class);
 
+        $reference = 'APP-'.str_pad((string) $fees->nextNumber('applications', 'reference'), 8, '0', STR_PAD_LEFT);
+        $feeType = app(ProcessNotifier::class)->isReapplication($institution)
+            ? ApplicationFeeService::FEE_APPLICATION_RENEWAL
+            : ApplicationFeeService::FEE_APPLICATION_NEW;
+        $amount = (float) config('eqa.fees.'.$feeType);
+        $crmId = (string) Str::uuid();
+
+        // Saved as a Draft; the application fee is invoiced once it is submitted.
         DB::table('applications')->insert(array_merge($data, [
-            'crm_id' => (string) Str::uuid(),
+            'crm_id' => $crmId,
             'reference' => $reference,
-            'status' => 'Pending Review',
-            'workflow_stage' => 'pending_review',
+            'status' => 'Draft',
+            'workflow_stage' => 'draft',
             'institution_crm_id' => $institution->crm_id,
             'institution_name' => $institution->name,
             'owner_name' => $institution->business_owner ?? null,
             'application_date' => Carbon::now()->toDateString(),
-            'total_due' => 0,
+            'application_fee' => $amount,
+            'total_due' => $amount,
         ]));
 
-        return redirect('/web/applications')->with('success', 'Application '.$reference.' submitted for review.');
+        return redirect('/web/applications/'.$crmId)
+            ->with('success', 'Application '.$reference.' saved as a draft. Review it and select Submit Application when it is ready.');
+    }
+
+    public function edit(Request $request, string $crmId): Response
+    {
+        $application = $this->ownApplication($request, $crmId);
+        abort_unless($application->status === 'Draft', 403);
+
+        return Inertia::render('Web/NewApplication', [
+            'institution' => $this->institution($request),
+            'application' => $application,
+        ]);
+    }
+
+    public function update(Request $request, string $crmId): RedirectResponse
+    {
+        $application = $this->ownApplication($request, $crmId);
+        abort_unless($application->status === 'Draft', 403);
+
+        DB::table('applications')->where('crm_id', $crmId)->update($this->validatedApplication($request));
+
+        return redirect('/web/applications/'.$crmId)->with('success', 'Application '.$application->reference.' updated.');
+    }
+
+    /** Submit a draft (the application fee is then invoiced), or resubmit requested changes. */
+    public function submit(Request $request, string $crmId): RedirectResponse
+    {
+        $application = $this->ownApplication($request, $crmId);
+        abort_unless($application->workflow_stage === 'draft', 403);
+
+        $fees = app(ApplicationFeeService::class);
+        $firstSubmission = $fees->awaitingSubmission($application);
+        $fees->submit($application);
+
+        $message = 'Application '.$application->reference.' submitted.';
+        $invoice = $fees->invoiceFor($crmId, ApplicationFeeService::APPLICATION_FEES);
+        if ($firstSubmission && $invoice !== null && $invoice->invoice_status !== 'Paid') {
+            $message .= ' Please pay the application fee (invoice '.$invoice->invoice_number.').';
+        }
+
+        return redirect('/web/applications/'.$crmId)->with('success', $message);
+    }
+
+    public function appeal(Request $request, string $crmId): RedirectResponse
+    {
+        $application = $this->ownApplication($request, $crmId);
+        $fees = app(ApplicationFeeService::class);
+
+        if (! $fees->canAppeal($application)) {
+            return redirect('/web/applications/'.$crmId)->with('error', 'This decision can no longer be appealed.');
+        }
+
+        $invoice = $fees->openAppeal($application);
+
+        return redirect('/web/applications/'.$crmId)
+            ->with('success', 'Appeal started. Pay the appeal fee (invoice '.$invoice->invoice_number.') to submit it.');
+    }
+
+    private function ownApplication(Request $request, string $crmId): object
+    {
+        $institution = $this->institution($request);
+        abort_if($institution === null, 403);
+
+        $application = DB::table('applications')
+            ->where('crm_id', $crmId)
+            ->where('institution_crm_id', $institution->crm_id)
+            ->first();
+        abort_if($application === null, 404);
+
+        return $application;
+    }
+
+    /** @return array<string, mixed> */
+    private function validatedApplication(Request $request): array
+    {
+        $flags = [
+            'sabc_designation',
+            'program_associate_degree', 'program_university_transfer', 'program_bachelors_degree', 'program_graduate_degree',
+            'program_career_training', 'program_language_training', 'program_theological_education', 'program_trades_apprenticeship',
+            'media_pamphlet', 'media_website', 'media_brochure', 'media_poster', 'media_banner', 'media_billboard',
+        ];
+        $affirmations = [
+            'affirm_policy_manual', 'affirm_website_compliance', 'affirm_written_permission',
+            'affirm_branding_guide', 'affirm_understands_comply', 'affirm_authorized',
+        ];
+
+        $rules = [
+            'total_enrolment' => ['nullable', 'integer', 'min:0'],
+            'intl_students_permit' => ['nullable', 'integer', 'min:0'],
+            'intl_students_other' => ['nullable', 'integer', 'min:0'],
+            'in_person_students' => ['nullable', 'integer', 'min:0'],
+            'online_students' => ['nullable', 'integer', 'min:0'],
+            'enrolment_type' => ['nullable', 'string', 'max:50'],
+            'brand_usage_plan' => ['nullable', 'string', 'max:2000'],
+            'other_logos_trademarks' => ['nullable', 'string', 'max:2000'],
+            'affiliates_partners' => ['nullable', 'string', 'max:2000'],
+            'representative_signature' => ['required', 'string', 'max:255'],
+        ];
+        foreach ($flags as $flag) {
+            $rules[$flag] = ['boolean'];
+        }
+        foreach ($affirmations as $affirmation) {
+            $rules[$affirmation] = ['accepted'];
+        }
+
+        $data = $request->validate($rules);
+        foreach (array_merge($flags, $affirmations) as $field) {
+            $data[$field] = $request->boolean($field);
+        }
+
+        return $data;
+    }
+
+    /** Human label for the acting institution portal user, for change notifications. */
+    private function portalActor(?object $institution): string
+    {
+        $name = trim((string) ($institution->name ?? ''));
+
+        return $name !== '' ? $name.' (institution portal)' : 'Institution portal';
     }
 }

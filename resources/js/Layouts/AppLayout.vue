@@ -1,31 +1,61 @@
 <script setup>
-import { Link, usePage } from '@inertiajs/vue3'
+import { Link, router, usePage } from '@inertiajs/vue3'
 import { computed } from 'vue'
 
 const page = usePage()
 const role = computed(() => page.props.auth?.role ?? 'institution')
 const user = computed(() => page.props.auth?.user ?? null)
+const logoutUrl = computed(() => page.props.logoutUrl ?? '/logout')
+const impersonating = computed(() => page.props.impersonating ?? null)
+const isMinistryAdmin = computed(() =>
+    (user.value?.roles ?? []).some((r) => r === 'Super Admin' || r === 'Ministry Admin'),
+)
+
+function stopImpersonating() {
+    router.post('/web/stop-impersonating')
+}
 
 const institutionNav = [
     { label: 'Home', href: '/web' },
     { label: 'Applications', href: '/web/applications' },
+    { label: 'Invoices', href: '/web/invoices' },
     { label: 'Institution', href: '/web/institution' },
     { label: 'Campuses', href: '/web/campuses' },
     { label: 'DBAs', href: '/web/dbas' },
     { label: 'Manage Users', href: '/web/users' },
 ]
-const ministryNav = [
+const ministryNav = computed(() => [
     { label: 'Dashboard', href: '/admin' },
     { label: 'Institutions', href: '/admin/institutions' },
     { label: 'DBAs', href: '/admin/dbas' },
     { label: 'Applications', href: '/admin/applications' },
     { label: 'Invoices', href: '/admin/invoices' },
-]
-const nav = computed(() => (role.value === 'ministry' ? ministryNav : institutionNav))
+    { label: 'Reports', href: '/admin/reports' },
+    ...(isMinistryAdmin.value
+        ? [
+            { label: 'Email Templates', href: '/admin/email-templates' },
+            { label: 'Staff', href: '/admin/staff' },
+        ]
+        : []),
+])
+const nav = computed(() => (role.value === 'ministry' ? ministryNav.value : institutionNav))
 </script>
 
 <template>
     <div class="flex min-h-screen flex-col bg-slate-100">
+        <div v-if="impersonating" class="bg-amber-400 text-amber-950">
+            <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm">
+                <span>
+                    You are signed in as <b>{{ user?.name }}</b> on behalf of the Ministry
+                    <span v-if="impersonating.name">(impersonated by {{ impersonating.name }})</span>.
+                </span>
+                <button
+                    type="button"
+                    @click="stopImpersonating"
+                    class="rounded bg-amber-950 px-3 py-1 text-xs font-semibold text-amber-50 hover:bg-amber-900"
+                >Return to admin</button>
+            </div>
+        </div>
         <header class="border-b-4" :style="{ backgroundColor: '#013366', borderColor: '#fcba19' }">
             <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
                 <Link :href="role === 'ministry' ? '/admin' : '/web'" class="flex items-center gap-3">
@@ -34,9 +64,9 @@ const nav = computed(() => (role.value === 'ministry' ? ministryNav : institutio
                 </Link>
                 <div class="flex items-center gap-4">
                     <span v-if="user" class="hidden text-sm text-slate-200 sm:inline">{{ user.name }}</span>
-                    <Link href="/logout" method="post" as="button" class="rounded bg-white/10 px-3 py-1.5 text-sm font-medium text-white hover:bg-white/20">
+                    <a :href="logoutUrl" class="rounded bg-white/10 px-3 py-1.5 text-sm font-medium text-white hover:bg-white/20">
                         Log off
-                    </Link>
+                    </a>
                 </div>
             </div>
             <nav class="bg-white/5">

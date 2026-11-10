@@ -1,12 +1,12 @@
 ## get values from Github actions yml file. under env
 export GIT_LOCAL_BRANCH?=$(shell git rev-parse --abbrev-ref HEAD)
-export NAMESPACE := $(or $(NAMESPACE), fe1642-dev)
+export NAMESPACE := $(or $(NAMESPACE), f40a2a-dev)
 export APP_NAME := $(or $(PROJECT_NAME), eqa)
 export BUILD_ID := $(or $(BUILD_ID), 1)
 export BUILD_REF := $(or $(BUILD_REF), $(GIT_LOCAL_BRANCH))
-export LICENSE_PLATE := $(or $(LICENSE_PLATE), fe1642)
+export LICENSE_PLATE := $(or $(LICENSE_PLATE), f40a2a)
 export LICENSE_BRANCH := $(or $(LICENSE_BRANCH), nonprod)
-export BUILD_NAMESPACE := $(or $(BUILD_NAMESPACE), fe1642-tools)
+export BUILD_NAMESPACE := $(or $(BUILD_NAMESPACE), f40a2a-tools)
 export DOMAIN := $(or $(DOMAIN), apps.gold.devops.gov.bc.ca)
 export HOST_PREFIX := $(or $(HOST_PREFIX), eqa)
 export SOURCE_REPOSITORY_BRANCH := $(or $(SOURCE_REPOSITORY_BRANCH), dev)
@@ -122,7 +122,8 @@ deploy-web:
 	test -n "$(BUILD_NAMESPACE)"
 	@echo "+\n++ Deploying Web into $(NAMESPACE)\n+"
 	@oc -n $(NAMESPACE) process -f $(DEPLOY_FILE) --param-file=$(PARAM_FILE) | oc -n $(NAMESPACE) apply -f -
-	$(call rollout_and_wait,dc/$(HOST_PREFIX))
+	@oc -n $(NAMESPACE) rollout restart deployment/$(HOST_PREFIX)
+	$(call rollout_and_wait,deployment/$(HOST_PREFIX))
 	@echo "+\n++ FINISHED Deploying Web\n+"
 
 build-patroni:

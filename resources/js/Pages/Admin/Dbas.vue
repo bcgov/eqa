@@ -19,7 +19,7 @@ const filtered = computed(() => {
     <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
             <h1 class="text-2xl font-bold text-slate-800">DBAs</h1>
-            <p class="text-sm text-slate-500">{{ filtered.length }} of {{ dbas.length }} &ldquo;Doing Business As&rdquo; names · migrated from Dynamics</p>
+            <p class="text-sm text-slate-500">{{ filtered.length }} of {{ dbas.length }} &ldquo;Doing Business As&rdquo; names ·</p>
         </div>
         <input v-model="search" type="search" placeholder="Search DBA, institution or city…" class="w-72 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-slate-500 focus:outline-none" />
     </div>
