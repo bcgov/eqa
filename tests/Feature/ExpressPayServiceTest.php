@@ -5,15 +5,16 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Services\ExpressPayService;
-use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 class ExpressPayServiceTest extends TestCase
 {
+    use RefreshDatabase;
+
     private ExpressPayService $service;
 
     protected function setUp(): void
@@ -27,28 +28,8 @@ class ExpressPayServiceTest extends TestCase
             'services.expresspay.payment_url' => 'https://test.pcir.gov.bc.ca/scripts/payment/payment.asp',
             'services.expresspay.query_url' => 'https://test.pcir.gov.bc.ca/scripts/process_transaction.asp',
             'services.expresspay.hash_expiry_minutes' => 30,
+            'services.expresspay.order_number_base' => null,
         ]);
-
-        // Only the tables the service touches; the full migration set targets Postgres.
-        Schema::create('invoices', function (Blueprint $table): void {
-            $table->uuid('crm_id')->primary();
-            $table->uuid('application_crm_id')->nullable();
-            $table->uuid('institution_crm_id')->nullable();
-            $table->decimal('invoice_amount', 12, 2)->nullable();
-            $table->decimal('total_charges', 12, 2)->nullable();
-            $table->decimal('invoice_balance', 12, 2)->nullable();
-            $table->string('invoice_status')->nullable();
-            $table->decimal('payment_amount', 12, 2)->nullable();
-            $table->date('payment_received_date')->nullable();
-            $table->string('payment_method')->nullable();
-            $table->text('transaction_reference')->nullable();
-            $table->text('transaction_authorization')->nullable();
-        });
-        Schema::create('applications', function (Blueprint $table): void {
-            $table->uuid('crm_id')->primary();
-            $table->boolean('fees_payment_received')->nullable();
-        });
-        (require database_path('migrations/2026_10_09_000001_create_payment_transactions_table.php'))->up();
 
         DB::table('applications')->insert(['crm_id' => 'app-1', 'fees_payment_received' => false]);
         DB::table('invoices')->insert([

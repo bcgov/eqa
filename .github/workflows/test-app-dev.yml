@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - dev
+permissions:
+  contents: read
 jobs:
   laravel-tests:
 
@@ -31,13 +33,8 @@ jobs:
       - name: Directory Permissions
         run: chmod -R 777 storage bootstrap/cache
 
-      - name: Create Database
-        run: |
-          mkdir -p database
-          touch database/database.sqlite
-
       - name: Execute tests (Unit and Feature tests) via PHPUnit/Pest
         env:
           DB_CONNECTION: sqlite
-          DB_DATABASE: database/database.sqlite
+          DB_DATABASE: ':memory:'
         run: php artisan test
