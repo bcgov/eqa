@@ -109,7 +109,8 @@ objects:
         type: RollingUpdate
       replicas: 1
       selector:
-        name: ${BACKUP_POSTGRESQL_APP_NAME}
+        matchLabels:
+          name: ${BACKUP_POSTGRESQL_APP_NAME}
       template:
         metadata:
           name: ${BACKUP_POSTGRESQL_APP_NAME}
@@ -134,7 +135,7 @@ objects:
                     path: ${CONFIG_FILE_NAME}
           containers:
             - name: ${BACKUP_POSTGRESQL_APP_NAME}
-              image: ""
+              image: "image-registry.openshift-image-registry.svc:5000/${NAMESPACE_NAME}/${BACKUP_POSTGRESQL_APP_NAME}:${TAG_NAME}"
               ports: []
               env:
                 - name: BACKUP_STRATEGY
