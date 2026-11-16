@@ -54,6 +54,23 @@ class AdminInstitutionBceidSetupTest extends TestCase
         $this->assertNull(session()->get("bceid_lookup.{$this->crmId}"));
     }
 
+    public function test_fetch_is_rejected_when_the_bceid_user_is_already_a_contact_elsewhere(): void
+    {
+        $otherCrmId = (string) Str::uuid();
+        DB::table('institutions')->insert(['crm_id' => $otherCrmId, 'name' => 'Other College']);
+        DB::table('institution_users')->insert([
+            'crm_id' => (string) Str::uuid(),
+            'institution_crm_id' => $otherCrmId,
+            'bceid_user_guid' => 'USER-GUID-1',
+        ]);
+        $this->mockBceid();
+
+        $this->asMinistry()->post("/admin/institutions/{$this->crmId}/bceid-lookup", ['bceid_username' => 'admin01'])
+            ->assertSessionHas('error', 'This BCeID user is already a contact at another institution.');
+
+        $this->assertNull(session()->get("bceid_lookup.{$this->crmId}"));
+    }
+
     public function test_confirm_links_the_business_guid_and_creates_the_administrator_contact(): void
     {
         $this->mockBceid();

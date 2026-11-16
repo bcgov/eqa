@@ -33,7 +33,7 @@ class BceidService
         $config = config('bceid');
         foreach (['url', 'username', 'password', 'online_service_id', 'requester_user_guid'] as $key) {
             if (empty($config[$key])) {
-                throw new RuntimeException("BCeID integration is not configured ({$key} missing).");
+                $this->fail("BCeID integration is not configured ({$key} missing).");
             }
         }
 
@@ -100,16 +100,23 @@ class BceidService
         curl_close($ch);
 
         if ($response === false) {
-            throw new RuntimeException("Could not reach the BCeID web service: {$error}");
+            $this->fail("Could not reach the BCeID web service: {$error}", ['url' => $config['url']]);
         }
         if ($status === 401) {
-            throw new RuntimeException('BCeID rejected the service credentials (HTTP 401).');
+            $this->fail('BCeID rejected the service credentials (HTTP 401).', ['url' => $config['url'], 'domain' => $config['domain']]);
         }
         if ($status !== 200) {
-            throw new RuntimeException("BCeID web service returned HTTP {$status}.");
+            $this->fail("BCeID web service returned HTTP {$status}.", ['url' => $config['url']]);
         }
 
         return (string) $response;
+    }
+
+    private function fail(string $message, array $context = []): never
+    {
+        Log::error('BCeID lookup failed: '.$message, $context);
+
+        throw new RuntimeException($message);
     }
 
     /**
@@ -127,12 +134,12 @@ class BceidService
         libxml_use_internal_errors($prev);
 
         if ($xml === false) {
-            throw new RuntimeException('BCeID returned an unreadable response.');
+            $this->fail('BCeID returned an unreadable response.');
         }
 
         $result = $xml->Body->searchBCeIDAccountResponse->searchBCeIDAccountResult ?? null;
         if ($result === null) {
-            throw new RuntimeException('BCeID returned an unexpected response.');
+            $this->fail('BCeID returned an unexpected response.');
         }
 
         $code = (string) $result->code;

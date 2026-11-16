@@ -694,6 +694,14 @@ class InstitutionController extends Controller
             ->exists();
     }
 
+    private function userGuidInUseElsewhere(string $userGuid, string $crmId): bool
+    {
+        return DB::table('institution_users')
+            ->whereRaw('lower(bceid_user_guid) = ?', [Str::lower($userGuid)])
+            ->where('institution_crm_id', '!=', $crmId)
+            ->exists();
+    }
+
     /**
      * Fetch a BCeID account for a new institution's administrator. Nothing is saved
      * here; the result waits in the session until the admin confirms it.
@@ -730,6 +738,10 @@ class InstitutionController extends Controller
             return redirect($back)->with('error', 'This BCeID Business GUID is already assigned to another institution.');
         }
 
+        if ($this->userGuidInUseElsewhere($result['user_guid'], $crmId)) {
+            return redirect($back)->with('error', 'This BCeID user is already a contact at another institution.');
+        }
+
         session()->put($this->bceidLookupKey($crmId), [
             'bceid_username' => $username,
             'bceid_user_guid' => $result['user_guid'],
@@ -761,6 +773,10 @@ class InstitutionController extends Controller
 
         if ($this->businessGuidInUseElsewhere($lookup['bceid_business_guid'], $crmId)) {
             return redirect($back)->with('error', 'This BCeID Business GUID is already assigned to another institution.');
+        }
+
+        if ($this->userGuidInUseElsewhere($lookup['bceid_user_guid'], $crmId)) {
+            return redirect($back)->with('error', 'This BCeID user is already a contact at another institution.');
         }
 
         $contact = [
