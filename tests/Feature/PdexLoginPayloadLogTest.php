@@ -23,6 +23,7 @@ class PdexLoginPayloadLogTest extends TestCase
 
         $this->post('/pdex-login', [
             'token' => $this->unsignedJwt([
+                'aud' => config('services.pdex.jwt_audience'),
                 'sub' => 'user-guid-9',
                 'bceid_user_guid' => 'user-guid-9',
                 'bceid_business_guid' => strtoupper($businessGuid),
@@ -47,6 +48,7 @@ class PdexLoginPayloadLogTest extends TestCase
     {
         $this->post('/pdex-login', [
             'token' => $this->unsignedJwt([
+                'aud' => config('services.pdex.jwt_audience'),
                 'sub' => 'user-guid-10',
                 'bceid_user_guid' => 'user-guid-10',
                 'bceid_business_guid' => 'aaaaaaaa-0000-4000-8000-000000000000',

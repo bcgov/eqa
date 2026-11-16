@@ -51,7 +51,7 @@ class UserController extends Controller
 
         // Logged before validation so rejected or malformed logins are captured too.
         // The raw token is omitted: it is replayable because its signature is not verified.
-        Log::error('PDEX login payload received', [
+        Log::info('PDEX login payload received', [
             'user_type' => $userType,
             'logout_url' => $request->input('logoutUrl'),
             'claims' => $payload,
@@ -295,13 +295,7 @@ class UserController extends Controller
             return;
         }
 
-        $query = DB::table('institution_users');
-
-        if ($user->email) {
-            $query->whereRaw('lower(email) = ?', [Str::lower($user->email)]);
-        } else {
-            $query->whereRaw('lower(bceid_user_guid) = ?', [Str::lower($user->bceid_user_guid)]);
-        }
+        $query = DB::table('institution_users')->whereRaw('lower(bceid_user_guid) = ?', [Str::lower($user->bceid_user_guid)]);
 
         $updated = $query->update([
             'bceid_user_guid' => $user->bceid_user_guid,
