@@ -156,7 +156,10 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
     <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
             <h1 class="font-mono text-2xl font-bold text-slate-800">{{ application.reference }}</h1>
-            <p class="mt-1 text-sm text-slate-500">{{ application.institution_name }}</p>
+            <p class="mt-1 text-sm text-slate-500">
+                <Link v-if="application.institution_crm_id" :href="`/admin/institutions/${application.institution_crm_id}`" class="text-indigo-600 hover:underline">{{ application.institution_name }}</Link>
+                <span v-else>{{ application.institution_name }}</span>
+            </p>
         </div>
         <span class="rounded-full px-3 py-1 text-sm font-semibold" :class="statusClass">{{ application.status || '—' }}</span>
     </div>

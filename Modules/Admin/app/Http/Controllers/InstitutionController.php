@@ -68,6 +68,47 @@ class InstitutionController extends Controller
         ]);
     }
 
+    // --- Institution creation -------------------------------------------
+
+    public function createInstitution(): Response
+    {
+        return Inertia::render('Admin/NewInstitution');
+    }
+
+    public function storeInstitution(Request $request): RedirectResponse
+    {
+        $data = $request->validate([
+            'institution_number' => ['nullable', 'string', 'max:50'],
+            'name' => ['required', 'string', 'max:255'],
+            'legal_name' => ['required', 'string', 'max:255'],
+            'bceid_business_guid' => ['required', 'string', 'uuid', 'max:64', function (string $attribute, mixed $value, \Closure $fail): void {
+                $exists = DB::table('institutions')
+                    ->whereRaw('lower(bceid_business_guid) = ?', [Str::lower((string) $value)])
+                    ->exists();
+
+                if ($exists) {
+                    $fail('This BCeID Business GUID is already assigned to another institution.');
+                }
+            }],
+            'bc_incorporation_number' => ['nullable', 'string', 'max:100'],
+            'website' => ['nullable', 'string', 'max:255'],
+            'street1' => ['required', 'string', 'max:255'],
+            'street2' => ['nullable', 'string', 'max:255'],
+            'city' => ['required', 'string', 'max:255'],
+            'province' => ['required', 'string', 'max:100'],
+            'postal_code' => ['required', 'string', 'max:20'],
+            'country' => ['required', 'string', 'max:100'],
+        ]);
+
+        $crmId = (string) Str::uuid();
+        DB::table('institutions')->insert(array_merge($data, [
+            'crm_id' => $crmId,
+            'bceid_business_guid' => Str::lower($data['bceid_business_guid']),
+        ]));
+
+        return redirect("/admin/institutions/{$crmId}")->with('success', 'Institution created.');
+    }
+
     // --- Institution details --------------------------------------------
 
     public function edit(string $crmId): Response

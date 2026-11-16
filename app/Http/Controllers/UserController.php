@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -46,11 +47,19 @@ class UserController extends Controller
         $token = (string) $request->input('token');
         $userType = (string) $request->input('user_type');
 
+        $payload = $token === '' ? null : $this->decodeJwt($token);
+
+        // Logged before validation so rejected or malformed logins are captured too.
+        // The raw token is omitted: it is replayable because its signature is not verified.
+        Log::error('PDEX login payload received', [
+            'user_type' => $userType,
+            'logout_url' => $request->input('logoutUrl'),
+            'claims' => $payload,
+        ]);
+
         if ($token === '' || $userType === '') {
             abort(400, 'Missing SSO token.');
         }
-
-        $payload = $this->decodeJwt($token);
 
         if ($payload === null || empty($payload['sub'])) {
             abort(401, 'Invalid SSO token.');

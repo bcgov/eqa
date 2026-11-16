@@ -104,6 +104,9 @@ Route::get('/admin/institutions', function () {
     return Inertia::render('Admin/Institutions', ['institutions' => $institutions]);
 })->name('admin.institutions');
 
+Route::get('/admin/institutions/new', [InstitutionController::class, 'createInstitution'])->name('admin.institution.create');
+Route::post('/admin/institutions', [InstitutionController::class, 'storeInstitution'])->name('admin.institution.store');
+
 // Admin institution view — manage its Locations (campuses) and Contacts (users).
 Route::get('/admin/institutions/{crmId}', [InstitutionController::class, 'show'])->name('admin.institution.show');
 Route::get('/admin/institutions/{crmId}/edit', [InstitutionController::class, 'edit'])->name('admin.institution.edit');

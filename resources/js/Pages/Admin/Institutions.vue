@@ -74,6 +74,7 @@ function standingClass(s) {
             <p class="text-sm text-slate-500">{{ filtered.length }} of {{ institutions.length }} institutions ·</p>
         </div>
         <div class="flex flex-wrap items-center gap-3">
+            <Link href="/admin/institutions/new" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700">Add institution</Link>
             <label class="flex items-center gap-2 text-sm text-slate-500">EQA Status
                 <select v-model="eqaStatusFilter" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-slate-500 focus:outline-none">
                     <option value="">All</option>
