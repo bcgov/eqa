@@ -9,6 +9,7 @@ const props = defineProps({
     users: { type: Array, default: () => [] },
     dbas: { type: Array, default: () => [] },
     sentEmails: { type: Array, default: () => [] },
+    bceidLookup: { type: Object, default: null },
     designationOptions: { type: Object, default: () => ({ statuses: [], standings: [], ptibRequired: false, ptibQaMetThrough: '' }) },
 })
 
@@ -163,6 +164,34 @@ function fetchBceid(u) {
     })
 }
 
+// BCeID administrator setup: only offered while the institution has no applications, locations or contacts.
+const canSetupBceidAdmin = computed(() =>
+    props.applications.length === 0 && props.campuses.length === 0 && props.users.length === 0
+)
+const bceidLookupForm = useForm({ bceid_username: '' })
+const bceidReviewRows = computed(() => {
+    const l = props.bceidLookup
+    if (!l) return []
+    return [
+        ['BCeID username', l.bceid_username],
+        ['BCeID user GUID', l.bceid_user_guid],
+        ['BCeID business GUID', l.bceid_business_guid],
+        ['Business legal name', l.bceid_business_legal_name],
+        ['Name', [l.first_name, l.last_name].filter(Boolean).join(' ')],
+        ['Email', l.email],
+    ]
+})
+function lookupBceidAdmin() {
+    bceidLookupForm.post(`/admin/institutions/${instId.value}/bceid-lookup`, { preserveScroll: true })
+}
+function confirmBceidAdmin() {
+    if (!confirm(`Update ${props.institution?.name || 'this institution'} with this BCeID business and create the administrator contact?`)) return
+    router.post(`/admin/institutions/${instId.value}/bceid-lookup/confirm`, {}, { preserveScroll: true })
+}
+function cancelBceidAdmin() {
+    router.delete(`/admin/institutions/${instId.value}/bceid-lookup`, { preserveScroll: true })
+}
+
 function toggleDba(d) {
     router.patch(`/admin/institutions/${instId.value}/dbas/${d.crm_id}/toggle`)
 }
@@ -281,6 +310,39 @@ function removeDba(d) {
                 <div class="flex justify-between py-2"><dt class="text-slate-500">In-Person</dt><dd class="text-slate-800">{{ institution?.in_person_students ?? '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Online</dt><dd class="text-slate-800">{{ institution?.online_students ?? '—' }}</dd></div>
             </dl>
+        </div>
+    </div>
+
+    <div v-if="canSetupBceidAdmin" class="mt-8 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <h2 class="text-lg font-semibold text-slate-800">Set up BCeID administrator</h2>
+        <p class="mt-1 text-sm text-slate-500">This institution has no applications, locations or contacts. Enter the BCeID username of its administrator to fetch the business details.</p>
+
+        <form v-if="!bceidLookup" class="mt-4 flex flex-wrap items-end gap-3" @submit.prevent="lookupBceidAdmin">
+            <label class="flex flex-col text-xs text-slate-500">BCeID username
+                <input v-model="bceidLookupForm.bceid_username" type="text" maxlength="60" required
+                    class="mt-1 w-64 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-slate-500 focus:outline-none" />
+            </label>
+            <button type="submit" :disabled="bceidLookupForm.processing"
+                class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50">
+                {{ bceidLookupForm.processing ? 'Fetching…' : 'Fetch BCeID data' }}
+            </button>
+            <p v-if="bceidLookupForm.errors.bceid_username" class="w-full text-sm text-red-700">{{ bceidLookupForm.errors.bceid_username }}</p>
+        </form>
+
+        <div v-else class="mt-4">
+            <dl class="divide-y divide-slate-100 text-sm">
+                <div v-for="[label, value] in bceidReviewRows" :key="label" class="flex justify-between gap-4 py-2">
+                    <dt class="text-slate-500">{{ label }}</dt>
+                    <dd class="break-all text-right font-mono text-slate-800">{{ value || '—' }}</dd>
+                </div>
+            </dl>
+            <p class="mt-3 text-sm text-slate-600">Confirming sets this BCeID business GUID on the institution and creates the administrator as a contact.</p>
+            <div class="mt-4 flex gap-3">
+                <button type="button" @click="confirmBceidAdmin"
+                    class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700">Confirm and create administrator</button>
+                <button type="button" @click="cancelBceidAdmin"
+                    class="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+            </div>
         </div>
     </div>
 

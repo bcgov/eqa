@@ -65,6 +65,7 @@ class InstitutionController extends Controller
             'sentEmails' => Schema::hasTable('sent_emails')
                 ? DB::table('sent_emails')->where('institution_crm_id', $crmId)->orderByDesc('sent_at')->orderByDesc('id')->get()
                 : collect(),
+            'bceidLookup' => session($this->bceidLookupKey($crmId)),
         ]);
     }
 
@@ -667,6 +668,135 @@ class InstitutionController extends Controller
 
         return redirect("/admin/institutions/{$crmId}")
             ->with('success', "BCeID data fetched for \"{$username}\".");
+    }
+
+    // --- Institution BCeID administrator setup -------------------------
+
+    private function bceidLookupKey(string $crmId): string
+    {
+        return "bceid_lookup.{$crmId}";
+    }
+
+    /** A BCeID administrator can only be set up while the institution has no applications, locations or staff. */
+    private function hasNoApplicationsLocationsOrStaff(string $crmId): bool
+    {
+        $hasRecords = fn (string $table): bool => Schema::hasTable($table)
+            && DB::table($table)->where('institution_crm_id', $crmId)->exists();
+
+        return ! $hasRecords('applications') && ! $hasRecords('campuses') && ! $hasRecords('institution_users');
+    }
+
+    private function businessGuidInUseElsewhere(string $businessGuid, string $crmId): bool
+    {
+        return DB::table('institutions')
+            ->whereRaw('lower(bceid_business_guid) = ?', [Str::lower($businessGuid)])
+            ->where('crm_id', '!=', $crmId)
+            ->exists();
+    }
+
+    /**
+     * Fetch a BCeID account for a new institution's administrator. Nothing is saved
+     * here; the result waits in the session until the admin confirms it.
+     */
+    public function lookupBceid(Request $request, string $crmId, BceidService $bceid): RedirectResponse
+    {
+        abort_if($this->institution($crmId) === null, 404);
+        $back = "/admin/institutions/{$crmId}";
+
+        if (! $this->hasNoApplicationsLocationsOrStaff($crmId)) {
+            return redirect($back)->with('error', 'A BCeID administrator can only be set up for an institution with no applications, locations or staff.');
+        }
+
+        $data = $request->validate([
+            'bceid_username' => ['required', 'string', 'max:60'],
+        ]);
+        $username = trim($data['bceid_username']);
+
+        try {
+            $result = $bceid->search($username);
+        } catch (RuntimeException $e) {
+            return redirect($back)->with('error', "BCeID lookup failed: {$e->getMessage()}");
+        }
+
+        if (! $result['found']) {
+            return redirect($back)->with('error', "No BCeID account found for username \"{$username}\".");
+        }
+
+        if ($result['user_guid'] === null || $result['business_guid'] === null) {
+            return redirect($back)->with('error', "BCeID account \"{$username}\" is not linked to a business, so it cannot administer an institution.");
+        }
+
+        if ($this->businessGuidInUseElsewhere($result['business_guid'], $crmId)) {
+            return redirect($back)->with('error', 'This BCeID Business GUID is already assigned to another institution.');
+        }
+
+        session()->put($this->bceidLookupKey($crmId), [
+            'bceid_username' => $username,
+            'bceid_user_guid' => $result['user_guid'],
+            'bceid_business_guid' => $result['business_guid'],
+            'bceid_business_legal_name' => $result['business_legal_name'],
+            'first_name' => $result['first_name'],
+            'last_name' => $result['last_name'],
+            'email' => $result['email'],
+        ]);
+
+        return redirect($back)->with('success', "BCeID data fetched for \"{$username}\". Review the details below and confirm.");
+    }
+
+    /** Save the reviewed BCeID lookup: link the business GUID to the institution and add the administrator as a contact. */
+    public function confirmBceidLookup(string $crmId): RedirectResponse
+    {
+        $institution = $this->institution($crmId);
+        abort_if($institution === null, 404);
+        $back = "/admin/institutions/{$crmId}";
+
+        $lookup = session()->pull($this->bceidLookupKey($crmId));
+        if ($lookup === null) {
+            return redirect($back)->with('error', 'There is no BCeID lookup to confirm. Fetch the BCeID data again.');
+        }
+
+        if (! $this->hasNoApplicationsLocationsOrStaff($crmId)) {
+            return redirect($back)->with('error', 'A BCeID administrator can only be set up for an institution with no applications, locations or staff.');
+        }
+
+        if ($this->businessGuidInUseElsewhere($lookup['bceid_business_guid'], $crmId)) {
+            return redirect($back)->with('error', 'This BCeID Business GUID is already assigned to another institution.');
+        }
+
+        $contact = [
+            'crm_id' => (string) Str::uuid(),
+            'institution_crm_id' => $crmId,
+            'institution_name' => $institution->name,
+            'first_name' => $lookup['first_name'],
+            'last_name' => $lookup['last_name'],
+            'full_name' => trim(($lookup['first_name'] ?? '').' '.($lookup['last_name'] ?? '')) ?: null,
+            'email' => $lookup['email'],
+            'bceid_username' => $lookup['bceid_username'],
+            'bceid_user_guid' => $lookup['bceid_user_guid'],
+            'bceid_business_guid' => $lookup['bceid_business_guid'],
+            'bceid_business_legal_name' => $lookup['bceid_business_legal_name'],
+            'bceid_fetched_at' => now(),
+        ];
+
+        DB::transaction(function () use ($crmId, $lookup, $contact): void {
+            DB::table('institutions')->where('crm_id', $crmId)->update([
+                'bceid_business_guid' => Str::lower($lookup['bceid_business_guid']),
+            ]);
+            DB::table('institution_users')->insert($contact);
+        });
+
+        app(ProcessNotifier::class)->portalUserCreated($contact, $institution);
+
+        return redirect($back)->with('success', "BCeID administrator \"{$lookup['bceid_username']}\" added to this institution.");
+    }
+
+    public function cancelBceidLookup(string $crmId): RedirectResponse
+    {
+        abort_if($this->institution($crmId) === null, 404);
+
+        session()->forget($this->bceidLookupKey($crmId));
+
+        return redirect("/admin/institutions/{$crmId}");
     }
 
     // --- DBAs ----------------------------------------------------------
