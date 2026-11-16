@@ -223,15 +223,16 @@ class UserController extends Controller
             }
         }
 
-        // Dev fallback: bind to the institution with the most applications so the
-        // portal has history to show.
-        return DB::getSchemaBuilder()->hasTable('applications')
-            ? DB::table('applications')
-                ->whereNotNull('institution_crm_id')
-                ->groupBy('institution_crm_id')
-                ->orderByRaw('COUNT(*) DESC')
-                ->value('institution_crm_id')
-            : null;
+        // Disabled dev fallback: it bound users to the institution with the most applications.
+        // return DB::getSchemaBuilder()->hasTable('applications')
+        //     ? DB::table('applications')
+        //         ->whereNotNull('institution_crm_id')
+        //         ->groupBy('institution_crm_id')
+        //         ->orderByRaw('COUNT(*) DESC')
+        //         ->value('institution_crm_id')
+        //     : null;
+
+        return null;
     }
 
     /**
@@ -302,9 +303,50 @@ class UserController extends Controller
             $query->whereRaw('lower(bceid_user_guid) = ?', [Str::lower($user->bceid_user_guid)]);
         }
 
-        $query->update([
+        $updated = $query->update([
             'bceid_user_guid' => $user->bceid_user_guid,
             'bceid_business_guid' => $user->bceid_business_guid,
+        ]);
+
+        if ($updated === 0) {
+            $this->addGuestContact($user, $payload);
+        }
+    }
+
+    /**
+     * First BCeID login for an institution we know about: add the user as an
+     * institution Guest contact so an admin can elevate them later.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function addGuestContact(User $user, array $payload): void
+    {
+        $businessGuid = $payload['bceid_business_guid'] ?? null;
+
+        if (! $businessGuid) {
+            return;
+        }
+
+        $institution = DB::table('institutions')
+            ->whereRaw('lower(bceid_business_guid) = ?', [Str::lower((string) $businessGuid)])
+            ->first(['crm_id', 'name']);
+
+        if ($institution === null) {
+            return;
+        }
+
+        DB::table('institution_users')->insert([
+            'crm_id' => (string) Str::uuid(),
+            'institution_crm_id' => $institution->crm_id,
+            'institution_name' => $institution->name,
+            'full_name' => $user->name,
+            'first_name' => $user->first_name,
+            'last_name' => $user->last_name,
+            'email' => $user->email,
+            'role' => 'Guest',
+            'bceid_user_guid' => $user->bceid_user_guid,
+            'bceid_business_guid' => $businessGuid,
+            'bceid_username' => $user->bceid_username,
         ]);
     }
 
