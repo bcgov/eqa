@@ -51,7 +51,7 @@ class UserController extends Controller
 
         // Logged before validation so rejected or malformed logins are captured too.
         // The raw token is omitted: it is replayable because its signature is not verified.
-        Log::info('PDEX login payload received', [
+        Log::info('pdexLogin: PDEX login payload received', [
             'user_type' => $userType,
             'logout_url' => $request->input('logoutUrl'),
             'claims' => $payload,
@@ -87,6 +87,10 @@ class UserController extends Controller
             : User::where('bceid_user_guid', 'ilike', $payload['bceid_user_guid'] ?? $payload['sub'])->first();
 
         if ($user === null) {
+            Log::info('Registering new user for PDEX login', [
+                'user_type' => $portal,
+                'claims' => $payload,
+            ]);
             $user = $this->registerUser($payload, $portal);
         }
 
@@ -240,6 +244,10 @@ class UserController extends Controller
      */
     private function registerUser(array $payload, string $portal): User
     {
+        Log::info('registerUser: Registering new user for PDEX login', [
+            'user_type' => $portal,
+            'claims' => $payload,
+        ]);
         $email = $payload['email'] ?? null;
         $name = $payload['name']
             ?? (trim(($payload['given_name'] ?? '').' '.($payload['family_name'] ?? ''))
@@ -269,7 +277,16 @@ class UserController extends Controller
     /** Grant the audience GUEST role if the user has no roles yet. */
     private function ensureGuestRole(User $user, string $portal): void
     {
+        Log::info('ensureGuestRole: Ensuring guest role for user', [
+            'user_id' => $user->id,
+            'portal' => $portal,
+        ]);
+
         if ($user->roles()->exists()) {
+            Log::info('ensureGuestRole: User already has roles, skipping guest role assignment', [
+                'user_id' => $user->id,
+                'portal' => $portal,
+            ]);
             return;
         }
 
@@ -281,6 +298,10 @@ class UserController extends Controller
         $role = Role::firstOrCreate(['name' => $roleName]);
         $user->roles()->syncWithoutDetaching([$role->id]);
         $user->load('roles');
+        Log::info('attachRole: Role attached to user', [
+            'user_id' => $user->id,
+            'role_name' => $roleName,
+        ]);
     }
 
     /**
@@ -291,10 +312,18 @@ class UserController extends Controller
      */
     private function linkInstitution(User $user, array $payload): void
     {
+        Log::info('linkInstitution: Linking institution for PDEX login', [
+            'user_id' => $user->id,
+            'bceid_user_guid' => $user->bceid_user_guid,
+        ]);
         if (! $user->bceid_user_guid || ! DB::getSchemaBuilder()->hasTable('institution_users')) {
             return;
         }
 
+        Log::info('linkInstitution: Preparing to update institution user record', [
+            'user_id' => $user->id,
+            'bceid_user_guid' => $user->bceid_user_guid,
+        ]);
         $query = DB::table('institution_users')->whereRaw('lower(bceid_user_guid) = ?', [Str::lower($user->bceid_user_guid)]);
 
         $updated = $query->update([
@@ -303,6 +332,10 @@ class UserController extends Controller
         ]);
 
         if ($updated === 0) {
+            Log::info('linkInstitution: No matching institution user found, adding as guest contact', [
+                'user_id' => $user->id,
+                'bceid_user_guid' => $user->bceid_user_guid,
+            ]);
             $this->addGuestContact($user, $payload);
         }
     }
@@ -315,6 +348,10 @@ class UserController extends Controller
      */
     private function addGuestContact(User $user, array $payload): void
     {
+        Log::info('addGuestContact: Adding guest contact for PDEX login', [
+            'user_id' => $user->id,
+            'bceid_user_guid' => $user->bceid_user_guid,
+        ]);
         $businessGuid = $payload['bceid_business_guid'] ?? null;
 
         if (! $businessGuid) {
@@ -325,7 +362,17 @@ class UserController extends Controller
             ->whereRaw('lower(bceid_business_guid) = ?', [Str::lower((string) $businessGuid)])
             ->first(['crm_id', 'name']);
 
+        Log::info('addGuestContact: Looking up institution by business GUID', [
+            'user_id' => $user->id,
+            'bceid_user_guid' => $user->bceid_user_guid,
+            'bceid_business_guid' => $businessGuid,
+        ]);
         if ($institution === null) {
+            Log::info('addGuestContact: No institution found for business GUID', [
+                'user_id' => $user->id,
+                'bceid_user_guid' => $user->bceid_user_guid,
+                'bceid_business_guid' => $businessGuid,
+            ]);
             return;
         }
 
@@ -341,6 +388,11 @@ class UserController extends Controller
             'bceid_user_guid' => $user->bceid_user_guid,
             'bceid_business_guid' => $businessGuid,
             'bceid_username' => $user->bceid_username,
+        ]);
+        Log::info('addGuestContact: Guest contact added for PDEX login', [
+            'user_id' => $user->id,
+            'bceid_user_guid' => $user->bceid_user_guid,
+            'bceid_business_guid' => $businessGuid,
         ]);
     }
 
