@@ -46,7 +46,7 @@ function submit() {
                     <span v-if="form.errors.legal_name" class="mt-1 block text-xs text-red-600">{{ form.errors.legal_name }}</span>
                 </label>
                 <label class="block"><span class="text-sm text-slate-600">Institution ID</span>
-                    <input v-model="form.institution_number" type="text" :class="inputClass" />
+                    <input v-model="form.institution_number" type="text" placeholder="Leave blank to generate (ID-0000 000)" :class="inputClass" />
                     <span v-if="form.errors.institution_number" class="mt-1 block text-xs text-red-600">{{ form.errors.institution_number }}</span>
                 </label>
                 <label class="block sm:col-span-2"><span class="text-sm text-slate-600">BCeID Business GUID <span class="text-red-600">*</span></span>

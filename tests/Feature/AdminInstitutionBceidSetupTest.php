@@ -92,7 +92,60 @@ class AdminInstitutionBceidSetupTest extends TestCase
         $this->assertSame('admin01', $contact->bceid_username);
         $this->assertSame('user-guid-1', $contact->bceid_user_guid);
         $this->assertSame('Ada', $contact->first_name);
+        $this->assertSame('Admin', $contact->role);
         $this->assertNull(session()->get("bceid_lookup.{$this->crmId}"));
+
+        $account = User::where('bceid_user_guid', 'user-guid-1')->first();
+        $this->assertNotNull($account);
+        $this->assertSame('ada@example.test', $account->email);
+        $this->assertSame('ADMIN01', $account->bceid_username);
+        $this->assertFalse($account->disabled);
+        $this->assertTrue($account->hasRole(Role::INSTITUTION_ADMIN));
+        $this->assertSame('ID-0000 001', DB::table('institutions')->where('crm_id', $this->crmId)->value('institution_number'));
+    }
+
+    public function test_confirm_generates_the_next_institution_number_and_reuses_an_existing_account(): void
+    {
+        DB::table('institutions')->insert([
+            ['crm_id' => (string) Str::uuid(), 'name' => 'A', 'institution_number' => 'ID-1234 567'],
+            ['crm_id' => (string) Str::uuid(), 'name' => 'B', 'institution_number' => 'ID-0999 999'],
+        ]);
+        $existing = User::create([
+            'name' => 'Ada', 'email' => 'old@example.test', 'password' => Str::random(32),
+            'bceid_user_guid' => 'USER-GUID-1', 'disabled' => true,
+        ]);
+        $existing->roles()->attach(Role::firstOrCreate(['name' => Role::INSTITUTION_GUEST])->id);
+        $this->mockBceid();
+        $user = $this->ministryUser();
+
+        $this->actingAs($user)->withSession(['portal_role' => 'ministry'])
+            ->post("/admin/institutions/{$this->crmId}/bceid-lookup", ['bceid_username' => 'admin01']);
+        $this->actingAs($user)->withSession(['portal_role' => 'ministry'])
+            ->post("/admin/institutions/{$this->crmId}/bceid-lookup/confirm")
+            ->assertSessionHas('success');
+
+        $this->assertSame('ID-1234 568', DB::table('institutions')->where('crm_id', $this->crmId)->value('institution_number'));
+        $this->assertSame(2, User::count());
+        $existing->refresh()->load('roles');
+        $this->assertFalse($existing->disabled);
+        $this->assertTrue($existing->hasRole(Role::INSTITUTION_ADMIN));
+        $this->assertFalse($existing->hasRole(Role::INSTITUTION_GUEST));
+    }
+
+    public function test_confirm_is_rejected_when_a_new_account_email_is_already_taken(): void
+    {
+        User::create(['name' => 'Other', 'email' => 'ADA@example.test', 'password' => Str::random(32)]);
+        $this->mockBceid();
+        $user = $this->ministryUser();
+
+        $this->actingAs($user)->withSession(['portal_role' => 'ministry'])
+            ->post("/admin/institutions/{$this->crmId}/bceid-lookup", ['bceid_username' => 'admin01']);
+        $this->actingAs($user)->withSession(['portal_role' => 'ministry'])
+            ->post("/admin/institutions/{$this->crmId}/bceid-lookup/confirm")
+            ->assertSessionHas('error');
+
+        $this->assertSame(0, DB::table('institution_users')->count());
+        $this->assertNull(DB::table('institutions')->where('crm_id', $this->crmId)->value('bceid_business_guid'));
     }
 
     public function test_confirm_is_rejected_when_the_business_guid_was_claimed_after_the_fetch(): void

@@ -361,6 +361,15 @@ class UserController extends Controller
         $institution = DB::table('institutions')
             ->whereRaw('lower(bceid_business_guid) = ?', [Str::lower((string) $businessGuid)])
             ->first(['crm_id', 'name']);
+        // $institutionUser = InstitutionUser::
+        //     where('lower(bceid_user_guid) = ?', [Str::lower($user->bceid_user_guid)])
+        //     ->where('lower(bceid_business_guid) = ?', [Str::lower((string) $user->bceid_business_guid)])
+        //     ->first();
+        // Log::info('addGuestContact: Looking up institution user by user and business GUID', [
+        //     'institution_user_crm_id' => $institutionUser?->crm_id,
+        //     'institution_user_bceid_user_guid' => $institutionUser?->bceid_user_guid,
+        //     'institution_user_bceid_business_guid' => $institutionUser?->bceid_business_guid,
+        // ]);
 
         Log::info('addGuestContact: Looking up institution by business GUID', [
             'user_id' => $user->id,

@@ -104,6 +104,7 @@ class InstitutionController extends Controller
         $crmId = (string) Str::uuid();
         DB::table('institutions')->insert(array_merge($data, [
             'crm_id' => $crmId,
+            'institution_number' => trim((string) ($data['institution_number'] ?? '')) ?: $this->nextInstitutionNumber(),
             'bceid_business_guid' => Str::lower($data['bceid_business_guid']),
         ]));
 
@@ -779,6 +780,21 @@ class InstitutionController extends Controller
             return redirect($back)->with('error', 'This BCeID user is already a contact at another institution.');
         }
 
+        $account = User::withTrashed()
+            ->whereRaw('lower(bceid_user_guid) = ?', [Str::lower($lookup['bceid_user_guid'])])
+            ->first();
+        $email = trim((string) ($lookup['email'] ?? ''));
+
+        if ($account === null) {
+            if ($email === '') {
+                return redirect($back)->with('error', 'This BCeID account has no email address, so a portal account cannot be created for it.');
+            }
+
+            if (User::withTrashed()->whereRaw('lower(email) = ?', [Str::lower($email)])->exists()) {
+                return redirect($back)->with('error', "Another portal account already uses the email \"{$email}\".");
+            }
+        }
+
         $contact = [
             'crm_id' => (string) Str::uuid(),
             'institution_crm_id' => $crmId,
@@ -792,18 +808,77 @@ class InstitutionController extends Controller
             'bceid_business_guid' => $lookup['bceid_business_guid'],
             'bceid_business_legal_name' => $lookup['bceid_business_legal_name'],
             'bceid_fetched_at' => now(),
+            'role' => 'Admin',
+            'web_user_active' => true,
         ];
 
-        DB::transaction(function () use ($crmId, $lookup, $contact): void {
-            DB::table('institutions')->where('crm_id', $crmId)->update([
-                'bceid_business_guid' => Str::lower($lookup['bceid_business_guid']),
-            ]);
+        DB::transaction(function () use ($crmId, $institution, $lookup, $contact, $account, $email): void {
+            $institutionUpdate = ['bceid_business_guid' => Str::lower($lookup['bceid_business_guid'])];
+            if (trim((string) $institution->institution_number) === '') {
+                $institutionUpdate['institution_number'] = $this->nextInstitutionNumber();
+            }
+            DB::table('institutions')->where('crm_id', $crmId)->update($institutionUpdate);
+
             DB::table('institution_users')->insert($contact);
+
+            $this->upsertBceidAdminAccount($account, $lookup, $email);
         });
 
         app(ProcessNotifier::class)->portalUserCreated($contact, $institution);
 
         return redirect($back)->with('success', "BCeID administrator \"{$lookup['bceid_username']}\" added to this institution.");
+    }
+
+    /**
+     * Create (or reuse) the BCeID portal account for the confirmed administrator
+     * and make it an active Institution Admin, so the staff grid can show its
+     * role and the ministry "Login" action is available.
+     *
+     * @param  array<string, mixed>  $lookup
+     */
+    private function upsertBceidAdminAccount(?User $account, array $lookup, string $email): void
+    {
+        $name = trim(($lookup['first_name'] ?? '').' '.($lookup['last_name'] ?? '')) ?: $lookup['bceid_username'];
+
+        if ($account === null) {
+            $account = User::create([
+                'guid' => Str::of((string) Str::orderedUuid())->replace('-', '')->toString(),
+                'name' => $name,
+                'first_name' => $lookup['first_name'] ?? null,
+                'last_name' => $lookup['last_name'] ?? null,
+                'email' => $email,
+                'password' => Str::random(40),
+                'bceid_username' => Str::upper((string) $lookup['bceid_username']),
+                'bceid_user_guid' => $lookup['bceid_user_guid'],
+                'bceid_business_guid' => $lookup['bceid_business_guid'],
+            ]);
+        } else {
+            if ($account->trashed()) {
+                $account->restore();
+            }
+            $account->update([
+                'disabled' => false,
+                'bceid_username' => $account->bceid_username ?: Str::upper((string) $lookup['bceid_username']),
+                'bceid_business_guid' => $lookup['bceid_business_guid'],
+            ]);
+        }
+
+        $account->roles()->detach(Role::whereIn('name', self::INSTITUTION_ROLES)->pluck('id'));
+        $account->roles()->attach(Role::firstOrCreate(['name' => Role::INSTITUTION_ADMIN])->id);
+    }
+
+    /** Next institution number in the "ID-0000 000" sequence: the largest existing number plus one. */
+    private function nextInstitutionNumber(): string
+    {
+        $max = DB::table('institutions')
+            ->where('institution_number', 'like', 'ID-%')
+            ->pluck('institution_number')
+            ->map(fn ($n) => preg_match('/^ID-(\d{4}) ?(\d{3})$/', trim((string) $n), $m) ? (int) ($m[1].$m[2]) : 0)
+            ->max() ?? 0;
+
+        $digits = str_pad((string) ($max + 1), 7, '0', STR_PAD_LEFT);
+
+        return 'ID-'.substr($digits, 0, 4).' '.substr($digits, 4);
     }
 
     public function cancelBceidLookup(string $crmId): RedirectResponse
