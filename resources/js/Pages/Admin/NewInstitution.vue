@@ -35,7 +35,7 @@ function submit() {
         <section class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
             <h2 class="mb-4 text-sm font-semibold text-slate-700">Institution Details</h2>
             <div class="grid gap-4 sm:grid-cols-2">
-                <label class="block sm:col-span-2"><span class="text-sm text-slate-600">Institution Name <span class="text-red-600">*</span></span>
+                <label class="block"><span class="text-sm text-slate-600">Institution Name <span class="text-red-600">*</span></span>
                     <input v-model="form.name" type="text" :class="inputClass" />
                     <span v-if="form.errors.name" class="mt-1 block text-xs text-red-600">{{ form.errors.name }}</span>
                 </label>
