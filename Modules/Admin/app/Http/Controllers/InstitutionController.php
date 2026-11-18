@@ -82,15 +82,6 @@ class InstitutionController extends Controller
             'institution_number' => ['nullable', 'string', 'max:50'],
             'name' => ['required', 'string', 'max:255'],
             'legal_name' => ['required', 'string', 'max:255'],
-            'bceid_business_guid' => ['required', 'string', 'uuid', 'max:64', function (string $attribute, mixed $value, \Closure $fail): void {
-                $exists = DB::table('institutions')
-                    ->whereRaw('lower(bceid_business_guid) = ?', [Str::lower((string) $value)])
-                    ->exists();
-
-                if ($exists) {
-                    $fail('This BCeID Business GUID is already assigned to another institution.');
-                }
-            }],
             'bc_incorporation_number' => ['nullable', 'string', 'max:100'],
             'website' => ['nullable', 'string', 'max:255'],
             'street1' => ['required', 'string', 'max:255'],
@@ -105,7 +96,8 @@ class InstitutionController extends Controller
         DB::table('institutions')->insert(array_merge($data, [
             'crm_id' => $crmId,
             'institution_number' => trim((string) ($data['institution_number'] ?? '')) ?: $this->nextInstitutionNumber(),
-            'bceid_business_guid' => Str::lower($data['bceid_business_guid']),
+            // Placeholder until the real BCeID business is linked via "Fetch BCeID data".
+            'bceid_business_guid' => $this->uniqueBusinessGuid(),
         ]));
 
         return redirect("/admin/institutions/{$crmId}")->with('success', 'Institution created.');
@@ -865,6 +857,20 @@ class InstitutionController extends Controller
 
         $account->roles()->detach(Role::whereIn('name', self::INSTITUTION_ROLES)->pluck('id'));
         $account->roles()->attach(Role::firstOrCreate(['name' => Role::INSTITUTION_ADMIN])->id);
+    }
+
+    /** A lower-case UUID not yet held by any institution or BCeID account. */
+    private function uniqueBusinessGuid(): string
+    {
+        do {
+            $guid = Str::lower((string) Str::uuid());
+            $taken = DB::table('institutions')->whereRaw('lower(bceid_business_guid) = ?', [$guid])->exists()
+                || DB::table('users')->whereRaw('lower(bceid_business_guid) = ?', [$guid])->exists()
+                || (Schema::hasTable('institution_users')
+                    && DB::table('institution_users')->whereRaw('lower(bceid_business_guid) = ?', [$guid])->exists());
+        } while ($taken);
+
+        return $guid;
     }
 
     /** Next institution number in the "ID-0000 000" sequence: the largest existing number plus one. */

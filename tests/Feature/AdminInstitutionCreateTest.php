@@ -25,16 +25,34 @@ class AdminInstitutionCreateTest extends TestCase
         $this->withoutMiddleware(IsActive::class);
     }
 
-    public function test_ministry_user_can_create_institution_with_business_guid(): void
+    public function test_ministry_user_can_create_institution_with_a_generated_business_guid(): void
     {
-        $response = $this->asMinistry()->post('/admin/institutions', $this->validForm());
+        $response = $this->asMinistry()->post('/admin/institutions', $this->validForm(['bceid_business_guid' => self::GUID]));
 
         $institution = DB::table('institutions')->where('name', 'New College')->first();
         $this->assertNotNull($institution);
         $response->assertRedirect("/admin/institutions/{$institution->crm_id}");
-        $this->assertSame('3f2504e0-4f89-11d3-9a0c-0305e82c3301', $institution->bceid_business_guid);
+        $this->assertTrue(Str::isUuid($institution->bceid_business_guid));
+        $this->assertSame(Str::lower($institution->bceid_business_guid), $institution->bceid_business_guid);
+        $this->assertNotSame(Str::lower(self::GUID), $institution->bceid_business_guid);
         $this->assertSame('Vancouver', $institution->city);
         $this->assertSame('ID-0000 001', $institution->institution_number);
+    }
+
+    public function test_generated_business_guid_skips_values_already_in_use(): void
+    {
+        $taken = '00000000-0000-4000-8000-000000000001';
+        $fresh = '00000000-0000-4000-8000-000000000002';
+        DB::table('institutions')->insert(['crm_id' => (string) Str::uuid(), 'name' => 'Existing', 'bceid_business_guid' => $taken]);
+        Str::createUuidsUsingSequence(['11111111-1111-4111-8111-111111111111', strtoupper($taken), $fresh]);
+
+        try {
+            $this->asMinistry()->post('/admin/institutions', $this->validForm());
+        } finally {
+            Str::createUuidsNormally();
+        }
+
+        $this->assertSame($fresh, DB::table('institutions')->where('name', 'New College')->value('bceid_business_guid'));
     }
 
     public function test_blank_institution_number_is_generated_from_the_largest_existing_number(): void
@@ -46,36 +64,21 @@ class AdminInstitutionCreateTest extends TestCase
         $asMinistry->post('/admin/institutions', $this->validForm([
             'name' => 'Manual College',
             'institution_number' => 'ID-9000 000',
-            'bceid_business_guid' => '4F2504E0-4F89-11D3-9A0C-0305E82C3301',
         ]));
 
         $this->assertSame('ID-1234 568', DB::table('institutions')->where('name', 'New College')->value('institution_number'));
         $this->assertSame('ID-9000 000', DB::table('institutions')->where('name', 'Manual College')->value('institution_number'));
     }
 
-    public function test_required_fields_and_business_guid_format_are_validated(): void
+    public function test_required_fields_are_validated(): void
     {
-        $form = $this->validForm(['bceid_business_guid' => 'not-a-guid', 'street1' => '', 'legal_name' => '']);
+        $form = $this->validForm(['street1' => '', 'legal_name' => '']);
 
         $this->asMinistry()->post('/admin/institutions', $form)
-            ->assertSessionHasErrors(['bceid_business_guid', 'street1', 'legal_name'])
-            ->assertSessionDoesntHaveErrors(['name', 'city', 'province', 'postal_code', 'country']);
+            ->assertSessionHasErrors(['street1', 'legal_name'])
+            ->assertSessionDoesntHaveErrors(['name', 'city', 'province', 'postal_code', 'country', 'bceid_business_guid']);
 
         $this->assertSame(0, DB::table('institutions')->count());
-    }
-
-    public function test_business_guid_already_used_by_another_institution_is_rejected(): void
-    {
-        DB::table('institutions')->insert([
-            'crm_id' => (string) Str::uuid(),
-            'name' => 'Existing College',
-            'bceid_business_guid' => Str::lower(self::GUID),
-        ]);
-
-        $this->asMinistry()->post('/admin/institutions', $this->validForm(['bceid_business_guid' => self::GUID]))
-            ->assertSessionHasErrors('bceid_business_guid');
-
-        $this->assertSame(1, DB::table('institutions')->count());
     }
 
     /** @param  array<string, mixed>  $overrides */
@@ -84,7 +87,6 @@ class AdminInstitutionCreateTest extends TestCase
         return array_merge([
             'name' => 'New College',
             'legal_name' => 'New College Ltd.',
-            'bceid_business_guid' => self::GUID,
             'street1' => '123 Main St',
             'city' => 'Vancouver',
             'province' => 'BC',

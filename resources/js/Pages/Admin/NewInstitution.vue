@@ -7,7 +7,6 @@ const form = useForm({
     institution_number: '',
     name: '',
     legal_name: '',
-    bceid_business_guid: '',
     bc_incorporation_number: '',
     website: '',
     street1: '',
@@ -48,11 +47,6 @@ function submit() {
                 <label class="block"><span class="text-sm text-slate-600">Institution ID</span>
                     <input v-model="form.institution_number" type="text" placeholder="Leave blank to generate (ID-0000 000)" :class="inputClass" />
                     <span v-if="form.errors.institution_number" class="mt-1 block text-xs text-red-600">{{ form.errors.institution_number }}</span>
-                </label>
-                <label class="block sm:col-span-2"><span class="text-sm text-slate-600">BCeID Business GUID <span class="text-red-600">*</span></span>
-                    <input v-model="form.bceid_business_guid" type="text" placeholder="e.g. 3F2504E0-4F89-11D3-9A0C-0305E82C3301" :class="[inputClass, 'font-mono']" />
-                    <span v-if="form.errors.bceid_business_guid" class="mt-1 block text-xs text-red-600">{{ form.errors.bceid_business_guid }}</span>
-                    <span v-else class="mt-1 block text-xs text-slate-400">The institution's BCeID business account GUID. Must be unique across institutions.</span>
                 </label>
                 <label class="block"><span class="text-sm text-slate-600">BC Incorporation Number</span>
                     <input v-model="form.bc_incorporation_number" type="text" :class="inputClass" />

@@ -73,6 +73,7 @@ class AdminInstitutionBceidSetupTest extends TestCase
 
     public function test_confirm_links_the_business_guid_and_creates_the_administrator_contact(): void
     {
+        DB::table('institutions')->where('crm_id', $this->crmId)->update(['bceid_business_guid' => (string) Str::uuid()]);
         $this->mockBceid();
         $user = $this->ministryUser();
 
