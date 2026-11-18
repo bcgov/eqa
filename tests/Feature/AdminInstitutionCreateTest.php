@@ -55,19 +55,19 @@ class AdminInstitutionCreateTest extends TestCase
         $this->assertSame($fresh, DB::table('institutions')->where('name', 'New College')->value('bceid_business_guid'));
     }
 
-    public function test_blank_institution_number_is_generated_from_the_largest_existing_number(): void
+    public function test_institution_number_is_generated_from_the_largest_existing_number(): void
     {
         DB::table('institutions')->insert(['crm_id' => (string) Str::uuid(), 'name' => 'Existing', 'institution_number' => 'ID-1234 567']);
 
         $asMinistry = $this->asMinistry();
-        $asMinistry->post('/admin/institutions', $this->validForm(['institution_number' => '']));
+        $asMinistry->post('/admin/institutions', $this->validForm());
         $asMinistry->post('/admin/institutions', $this->validForm([
             'name' => 'Manual College',
             'institution_number' => 'ID-9000 000',
         ]));
 
         $this->assertSame('ID-1234 568', DB::table('institutions')->where('name', 'New College')->value('institution_number'));
-        $this->assertSame('ID-9000 000', DB::table('institutions')->where('name', 'Manual College')->value('institution_number'));
+        $this->assertSame('ID-1234 569', DB::table('institutions')->where('name', 'Manual College')->value('institution_number'));
     }
 
     public function test_required_fields_are_validated(): void

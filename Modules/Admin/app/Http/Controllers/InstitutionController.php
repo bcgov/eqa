@@ -79,7 +79,6 @@ class InstitutionController extends Controller
     public function storeInstitution(Request $request): RedirectResponse
     {
         $data = $request->validate([
-            'institution_number' => ['nullable', 'string', 'max:50'],
             'name' => ['required', 'string', 'max:255'],
             'legal_name' => ['required', 'string', 'max:255'],
             'bc_incorporation_number' => ['nullable', 'string', 'max:100'],
@@ -95,7 +94,7 @@ class InstitutionController extends Controller
         $crmId = (string) Str::uuid();
         DB::table('institutions')->insert(array_merge($data, [
             'crm_id' => $crmId,
-            'institution_number' => trim((string) ($data['institution_number'] ?? '')) ?: $this->nextInstitutionNumber(),
+            'institution_number' => $this->nextInstitutionNumber(),
             // Placeholder until the real BCeID business is linked via "Fetch BCeID data".
             'bceid_business_guid' => $this->uniqueBusinessGuid(),
         ]));

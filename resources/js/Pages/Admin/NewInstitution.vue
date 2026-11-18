@@ -4,7 +4,6 @@ import { Head, Link, useForm } from '@inertiajs/vue3'
 const inputClass = 'mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none'
 
 const form = useForm({
-    institution_number: '',
     name: '',
     legal_name: '',
     bc_incorporation_number: '',
@@ -43,10 +42,6 @@ function submit() {
                 <label class="block"><span class="text-sm text-slate-600">Legal Name <span class="text-red-600">*</span></span>
                     <input v-model="form.legal_name" type="text" :class="inputClass" />
                     <span v-if="form.errors.legal_name" class="mt-1 block text-xs text-red-600">{{ form.errors.legal_name }}</span>
-                </label>
-                <label class="block"><span class="text-sm text-slate-600">Institution ID</span>
-                    <input v-model="form.institution_number" type="text" placeholder="Leave blank to generate (ID-0000 000)" :class="inputClass" />
-                    <span v-if="form.errors.institution_number" class="mt-1 block text-xs text-red-600">{{ form.errors.institution_number }}</span>
                 </label>
                 <label class="block"><span class="text-sm text-slate-600">BC Incorporation Number</span>
                     <input v-model="form.bc_incorporation_number" type="text" :class="inputClass" />
