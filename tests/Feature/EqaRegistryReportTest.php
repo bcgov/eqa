@@ -28,7 +28,7 @@ class EqaRegistryReportTest extends TestCase
         $this->assertSame(['Gone College', 'Refused College'], array_column($html['noLongerDesignated'], 'name'));
         $this->assertSame(['03/01/2025', '06/30/2024'], array_column($html['noLongerDesignated'], 'date'));
 
-        $response = $this->get('/admin/report/institutions-eqa-registery');
+        $response = $this->get('/admin/report/institutions-eqa-registry');
 
         $response->assertOk()->assertHeader('Content-Type', 'application/pdf');
         $this->assertStringStartsWith('%PDF-', $response->getContent());
@@ -41,7 +41,7 @@ class EqaRegistryReportTest extends TestCase
         view()->composer('reports.eqa-registry', function ($view) use (&$captured): void {
             $captured = $view->getData();
         });
-        $this->get('/admin/report/institutions-eqa-registery')->assertOk();
+        $this->get('/admin/report/institutions-eqa-registry')->assertOk();
 
         return $captured;
     }

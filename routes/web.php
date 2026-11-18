@@ -35,7 +35,7 @@ Route::get('/payments/express-pay/receipt', [PaymentController::class, 'receipt'
     ->name('web.payments.receipt');
 
 // Public PDF registry of EQA-designated institutions (no login required).
-Route::get('/admin/report/institutions-eqa-registery', EqaRegistryReportController::class)
+Route::get('/admin/report/institutions-eqa-registry', EqaRegistryReportController::class)
     ->middleware('throttle:30,1')
     ->name('report.eqa-registry');
 
