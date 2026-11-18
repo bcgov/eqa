@@ -11,6 +11,7 @@ use Inertia\Inertia;
 use Modules\Admin\Http\Controllers\ApplicationController;
 use Modules\Admin\Http\Controllers\ApplicationWorkflowController;
 use Modules\Admin\Http\Controllers\EmailTemplateController;
+use Modules\Admin\Http\Controllers\EqaRegistryReportController;
 use Modules\Admin\Http\Controllers\InstitutionController;
 use Modules\Admin\Http\Controllers\InvoiceController;
 use Modules\Admin\Http\Controllers\ReportController;
@@ -32,6 +33,11 @@ Route::match(['get', 'post'], '/logout', [UserController::class, 'logout'])->nam
 Route::get('/payments/express-pay/receipt', [PaymentController::class, 'receipt'])
     ->middleware('throttle:30,1')
     ->name('web.payments.receipt');
+
+// Public PDF registry of EQA-designated institutions (no login required).
+Route::get('/admin/report/institutions-eqa-registery', EqaRegistryReportController::class)
+    ->middleware('throttle:30,1')
+    ->name('report.eqa-registry');
 
 // Institution (BCeID) web portal.
 Route::prefix('web')->middleware('is.active:institution')->group(function () {
