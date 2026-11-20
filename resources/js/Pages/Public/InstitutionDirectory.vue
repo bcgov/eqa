@@ -146,9 +146,9 @@ const pageRange = computed(() => {
                                 </select>
                             </label>
                             <nav aria-label="Designation status" class="text-[#255a90]">
-                                <Link :href="BASE" :data="query({ status: 'designated' })" :class="isPrevious ? 'hover:underline' : 'font-semibold underline'" :aria-current="isPrevious ? undefined : 'page'" preserve-scroll>Designated</Link>
+                                <Link :href="BASE" :data="query({ status: 'designated', city: '' })" :class="isPrevious ? 'hover:underline' : 'font-semibold underline'" :aria-current="isPrevious ? undefined : 'page'" preserve-scroll>Designated</Link>
                                 <span class="mx-1 text-slate-500">|</span>
-                                <Link :href="BASE" :data="query({ status: 'previous' })" :class="isPrevious ? 'font-semibold underline' : 'hover:underline'" :aria-current="isPrevious ? 'page' : undefined" preserve-scroll>Previously Designated</Link>
+                                <Link :href="BASE" :data="query({ status: 'previous', city: '' })" :class="isPrevious ? 'font-semibold underline' : 'hover:underline'" :aria-current="isPrevious ? 'page' : undefined" preserve-scroll>Previously Designated</Link>
                             </nav>
                         </div>
 
@@ -157,7 +157,7 @@ const pageRange = computed(() => {
                                 <caption class="sr-only">{{ isPrevious ? 'Previously designated institutions' : 'Designated institutions' }}</caption>
                                 <thead class="text-sm text-white" :style="{ backgroundColor: '#38598a' }">
                                     <tr>
-                                        <th scope="col" class="w-32 px-2 py-2 font-semibold">Institution ID</th>
+                                        <th v-if="!isPrevious" scope="col" class="w-32 px-2 py-2 font-semibold">DLI Number</th>
                                         <th scope="col" class="px-2 py-2 font-semibold">Institution</th>
                                         <th scope="col" class="w-36 px-2 py-2 font-semibold">City</th>
                                         <th scope="col" class="w-36 px-2 py-2 font-semibold">Status</th>
@@ -165,7 +165,7 @@ const pageRange = computed(() => {
                                 </thead>
                                 <tbody class="align-top text-slate-700">
                                     <tr v-for="i in institutions.data" :key="i.crm_id" class="border-t border-slate-200 hover:bg-slate-50">
-                                        <td class="whitespace-nowrap px-2 py-3">{{ i.institution_number || '—' }}</td>
+                                        <td v-if="!isPrevious" class="whitespace-nowrap px-2 py-3">{{ i.dli_number || '—' }}</td>
                                         <td class="px-2 py-3">
                                             <Link :href="detailUrl(i)" class="text-[#255a90] hover:underline">{{ i.name }}</Link>
                                             <div v-if="i.street">{{ i.street }}</div>
@@ -174,7 +174,7 @@ const pageRange = computed(() => {
                                         <td class="px-2 py-3">{{ i.status }}</td>
                                     </tr>
                                     <tr v-if="institutions.data.length === 0">
-                                        <td colspan="4" class="px-2 py-8 text-center text-slate-500">No institutions match your search.</td>
+                                        <td :colspan="isPrevious ? 3 : 4" class="px-2 py-8 text-center text-slate-500">No institutions match your search.</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -202,8 +202,11 @@ const pageRange = computed(() => {
                     <template v-else-if="institution">
                         <Link :href="resultsUrl" class="mt-4 inline-block text-[#255a90] hover:underline">Back to results</Link>
                         <div class="mt-1 flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-white" :style="{ backgroundColor: '#38598a' }">
-                            <h2 class="text-2xl">{{ institution.name }}</h2>
-                            <span class="text-2xl">{{ institution.institution_number }}</span>
+                            <div>
+                                <h2 class="text-2xl">{{ institution.name }}</h2>
+                                <p v-if="institution.legal_name && institution.legal_name !== institution.name" class="text-sm text-slate-100">Legal name: {{ institution.legal_name }}</p>
+                            </div>
+                            <span v-if="institution.dli_number" class="text-2xl"><span class="sr-only">DLI number </span>{{ institution.dli_number }}</span>
                         </div>
 
                         <div class="border border-t-0 border-slate-200">
@@ -270,7 +273,15 @@ const pageRange = computed(() => {
                                 <table class="w-full border border-slate-400 text-sm text-slate-700">
                                     <tbody>
                                         <tr class="border-b border-slate-400">
-                                            <th scope="row" class="w-40 border-r border-slate-400 p-2 text-left align-top font-semibold">Mailing Address</th>
+                                            <th scope="row" class="w-40 border-r border-slate-400 p-2 text-left align-top font-semibold">Legal Name</th>
+                                            <td class="p-2">{{ institution.legal_name || '—' }}</td>
+                                        </tr>
+                                        <tr v-if="institution.dli_number" class="border-b border-slate-400">
+                                            <th scope="row" class="border-r border-slate-400 p-2 text-left align-top font-semibold">DLI Number</th>
+                                            <td class="p-2">{{ institution.dli_number }}</td>
+                                        </tr>
+                                        <tr class="border-b border-slate-400">
+                                            <th scope="row" class="border-r border-slate-400 p-2 text-left align-top font-semibold">Mailing Address</th>
                                             <td class="p-2"><div v-for="line in institution.address" :key="line">{{ line }}</div><span v-if="!institution.address.length">—</span></td>
                                         </tr>
                                         <tr class="border-b border-slate-400">
@@ -327,7 +338,7 @@ const pageRange = computed(() => {
                                 class="mt-1 block w-full rounded border border-slate-400 bg-white px-2 py-1 font-normal"
                                 @input="onKeywords"
                             />
-                            <span class="mt-1 block text-xs font-normal text-slate-500">Institution name, ID or business name</span>
+                            <span class="mt-1 block text-xs font-normal text-slate-500">{{ isPrevious ? 'Institution name, legal name or business name' : 'Institution name, legal name, DLI number or business name' }}</span>
                         </label>
                         <label class="block font-semibold text-slate-700">City
                             <select

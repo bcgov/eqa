@@ -20,10 +20,10 @@ use Inertia\Response;
  */
 class InstitutionDirectoryController extends Controller
 {
-    /** "Previously designated" matches the "No longer EQA-designated" section of the PDF registry. */
+    /** "Previously designated" lists only institutions whose designation was removed. */
     private const STATUSES = [
         'designated' => ['Designated'],
-        'previous' => ['De-Designated', 'Not Approved'],
+        'previous' => ['De-Designated'],
     ];
 
     private const PER_PAGE = [10, 25, 50, 100];
@@ -31,15 +31,17 @@ class InstitutionDirectoryController extends Controller
     public function index(Request $request): Response
     {
         $filters = $this->filters($request);
+        $designated = $filters['status'] === 'designated';
 
         $institutions = $this->search($filters)
             ->orderBy('name')
-            ->select(['crm_id', 'institution_number', 'name', 'street1', 'city', 'eqa_status'])
+            ->select(['crm_id', 'dli_number', 'name', 'street1', 'city', 'eqa_status'])
             ->paginate($filters['per_page'])
             ->withQueryString()
             ->through(fn (object $i): array => [
                 'crm_id' => $i->crm_id,
-                'institution_number' => $i->institution_number,
+                // DLI numbers are only published for currently designated institutions.
+                'dli_number' => $designated ? $i->dli_number : null,
                 'name' => $i->name,
                 'street' => $this->firstLine($i->street1),
                 'city' => $i->city,
@@ -48,7 +50,7 @@ class InstitutionDirectoryController extends Controller
 
         return Inertia::render('Public/InstitutionDirectory', [
             'filters' => $filters,
-            'cities' => $this->cities(),
+            'cities' => $this->cities($filters['status']),
             'institutions' => $institutions,
             'institution' => null,
         ]);
@@ -61,15 +63,17 @@ class InstitutionDirectoryController extends Controller
             ->whereIn('eqa_status', array_merge(...array_values(self::STATUSES)))
             ->first();
         abort_if($institution === null, 404);
+        $filters = $this->filters($request);
 
         return Inertia::render('Public/InstitutionDirectory', [
-            'filters' => $this->filters($request),
-            'cities' => $this->cities(),
+            'filters' => $filters,
+            'cities' => $this->cities($filters['status']),
             'institutions' => null,
             'institution' => [
                 'crm_id' => $institution->crm_id,
-                'institution_number' => $institution->institution_number,
+                'dli_number' => $institution->eqa_status === 'Designated' ? $institution->dli_number : null,
                 'name' => $institution->name,
+                'legal_name' => $institution->legal_name,
                 'status' => $institution->eqa_status,
                 'designation_date' => $this->date($institution->designation_start),
                 'de_designated_date' => in_array($institution->eqa_status, self::STATUSES['previous'], true)
@@ -116,9 +120,12 @@ class InstitutionDirectoryController extends Controller
             ->whereIn('eqa_status', self::STATUSES[$filters['status']])
             ->when($filters['q'] !== '', function (Builder $q) use ($filters): void {
                 $like = '%'.$this->escapeLike(mb_strtolower($filters['q'])).'%';
-                $q->where(function (Builder $q) use ($like): void {
+                $q->where(function (Builder $q) use ($like, $filters): void {
                     $q->whereRaw("lower(name) like ? escape '!'", [$like])
-                        ->orWhereRaw("lower(institution_number) like ? escape '!'", [$like]);
+                        ->orWhereRaw("lower(legal_name) like ? escape '!'", [$like]);
+                    if ($filters['status'] === 'designated') {
+                        $q->orWhereRaw("lower(dli_number) like ? escape '!'", [$like]);
+                    }
                     if (Schema::hasTable('dbas')) {
                         $q->orWhereExists(fn (Builder $d) => $d->from('dbas')
                             ->whereColumn('dbas.institution_crm_id', 'institutions.crm_id')
@@ -141,10 +148,10 @@ class InstitutionDirectoryController extends Controller
             });
     }
 
-    /** Cities of listed institutions and their active locations, for the "City" filter. @return array<int, string> */
-    private function cities(): array
+    /** Cities of institutions on the selected list and their active locations, for the "City" filter. @return array<int, string> */
+    private function cities(string $status): array
     {
-        $listed = array_merge(...array_values(self::STATUSES));
+        $listed = self::STATUSES[$status];
         $cities = DB::table('institutions')->whereIn('eqa_status', $listed)->pluck('city');
 
         if (Schema::hasTable('campuses')) {
