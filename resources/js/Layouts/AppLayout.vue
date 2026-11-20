@@ -84,11 +84,5 @@ const nav = computed(() => (role.value === 'ministry' ? ministryNav.value : inst
         <main class="mx-auto w-full max-w-7xl flex-1 px-4 py-8">
             <slot />
         </main>
-
-        <footer class="border-t border-slate-200 bg-white">
-            <div class="mx-auto max-w-7xl px-4 py-4 text-xs text-slate-400">
-                Migrated from the legacy Microsoft estate · Served by bcmtol-webserver-dest
-            </div>
-        </footer>
     </div>
 </template>

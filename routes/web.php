@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\InstitutionDirectoryController;
 use App\Http\Controllers\UserController;
 use App\Models\Role;
 use Illuminate\Support\Facades\DB;
@@ -33,6 +34,15 @@ Route::match(['get', 'post'], '/logout', [UserController::class, 'logout'])->nam
 Route::get('/payments/express-pay/receipt', [PaymentController::class, 'receipt'])
     ->middleware('throttle:30,1')
     ->name('web.payments.receipt');
+
+// Public institution directory (no login required).
+Route::get('/institution-directory', [InstitutionDirectoryController::class, 'index'])
+    ->middleware('throttle:120,1')
+    ->name('institution-directory');
+Route::get('/institution-directory/{crmId}', [InstitutionDirectoryController::class, 'show'])
+    ->middleware('throttle:120,1')
+    ->whereUuid('crmId')
+    ->name('institution-directory.show');
 
 // Public PDF registry of EQA-designated institutions (no login required).
 Route::get('/admin/report/institutions-eqa-registry', EqaRegistryReportController::class)
