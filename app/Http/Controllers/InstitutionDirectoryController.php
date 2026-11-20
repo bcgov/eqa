@@ -35,7 +35,7 @@ class InstitutionDirectoryController extends Controller
 
         $institutions = $this->search($filters)
             ->orderBy('name')
-            ->select(['crm_id', 'dli_number', 'name', 'street1', 'city', 'eqa_status'])
+            ->select(['crm_id', 'dli_number', 'name', 'street1', 'city', 'eqa_status', 'de_designated_date', 'designation_expiry'])
             ->paginate($filters['per_page'])
             ->withQueryString()
             ->through(fn (object $i): array => [
@@ -46,6 +46,7 @@ class InstitutionDirectoryController extends Controller
                 'street' => $this->firstLine($i->street1),
                 'city' => $i->city,
                 'status' => $i->eqa_status,
+                'de_designated_date' => $designated ? null : $this->deDesignatedDate($i),
             ]);
 
         return Inertia::render('Public/InstitutionDirectory', [
@@ -77,7 +78,7 @@ class InstitutionDirectoryController extends Controller
                 'status' => $institution->eqa_status,
                 'designation_date' => $this->date($institution->designation_start),
                 'de_designated_date' => in_array($institution->eqa_status, self::STATUSES['previous'], true)
-                    ? $this->date(($institution->de_designated_date ?? null) ?: $institution->designation_expiry)
+                    ? $this->deDesignatedDate($institution)
                     : null,
                 'address' => $this->address($institution),
                 'website' => $institution->website,
@@ -205,6 +206,12 @@ class InstitutionDirectoryController extends Controller
         $line = trim((string) strtok((string) $value, "\r\n"));
 
         return $line === '' ? null : $line;
+    }
+
+    /** Migrated rows have no recorded de-designation date, so their designation expiry stands in for it. */
+    private function deDesignatedDate(object $institution): ?string
+    {
+        return $this->date(($institution->de_designated_date ?? null) ?: $institution->designation_expiry);
     }
 
     private function date(?string $value): ?string

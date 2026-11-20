@@ -161,6 +161,7 @@ const pageRange = computed(() => {
                                         <th scope="col" class="px-2 py-2 font-semibold">Institution</th>
                                         <th scope="col" class="w-36 px-2 py-2 font-semibold">City</th>
                                         <th scope="col" class="w-36 px-2 py-2 font-semibold">Status</th>
+                                        <th v-if="isPrevious" scope="col" class="w-40 px-2 py-2 font-semibold">Date De-Designated</th>
                                     </tr>
                                 </thead>
                                 <tbody class="align-top text-slate-700">
@@ -172,9 +173,10 @@ const pageRange = computed(() => {
                                         </td>
                                         <td class="px-2 py-3">{{ i.city || '—' }}</td>
                                         <td class="px-2 py-3">{{ i.status }}</td>
+                                        <td v-if="isPrevious" class="whitespace-nowrap px-2 py-3">{{ i.de_designated_date || '—' }}</td>
                                     </tr>
                                     <tr v-if="institutions.data.length === 0">
-                                        <td :colspan="isPrevious ? 3 : 4" class="px-2 py-8 text-center text-slate-500">No institutions match your search.</td>
+                                        <td colspan="4" class="px-2 py-8 text-center text-slate-500">No institutions match your search.</td>
                                     </tr>
                                 </tbody>
                             </table>

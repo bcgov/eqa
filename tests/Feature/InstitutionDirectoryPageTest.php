@@ -35,15 +35,18 @@ class InstitutionDirectoryPageTest extends TestCase
     public function test_previous_status_lists_only_de_designated_institutions_without_dli(): void
     {
         $this->institution('Alpha College', 'Designated', ['city' => 'Surrey']);
-        $this->institution('Gone College', 'De-Designated', ['city' => 'Nanaimo', 'dli_number' => 'O999']);
+        $this->institution('Gone College', 'De-Designated', ['city' => 'Nanaimo', 'dli_number' => 'O999', 'de_designated_date' => '2025-03-01']);
+        $this->institution('Lapsed College', 'De-Designated', ['city' => 'Nanaimo', 'designation_expiry' => '2024-06-30']);
         $refused = $this->institution('Refused College', 'Not Approved', ['city' => 'Kamloops']);
 
         $this->get('/institution-directory?status=previous')
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->where('filters.status', 'previous')
-                ->where('institutions.total', 1)
+                ->where('institutions.total', 2)
                 ->where('institutions.data.0.name', 'Gone College')
                 ->where('institutions.data.0.dli_number', null)
+                ->where('institutions.data.0.de_designated_date', 'March 1, 2025')
+                ->where('institutions.data.1.de_designated_date', 'June 30, 2024')
                 ->where('cities', ['Nanaimo']));
 
         $this->get("/institution-directory/{$refused}")->assertNotFound();
