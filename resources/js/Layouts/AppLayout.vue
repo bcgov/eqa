@@ -33,8 +33,8 @@ const ministryNav = computed(() => [
     { label: 'Reports', href: '/admin/reports' },
     ...(isMinistryAdmin.value
         ? [
-            { label: 'Email Templates', href: '/admin/email-templates' },
             { label: 'Staff', href: '/admin/staff' },
+            { label: 'Maintenance', href: '/admin/maintenance/utils' },
         ]
         : []),
 ])

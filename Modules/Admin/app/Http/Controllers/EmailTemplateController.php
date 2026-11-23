@@ -55,7 +55,7 @@ class EmailTemplateController extends Controller
             'updated_at' => now(),
         ]);
 
-        return redirect('/admin/email-templates')->with('success', 'Email template updated.');
+        return redirect('/admin/maintenance/email-templates')->with('success', 'Email template updated.');
     }
 
     public function sendTest(Request $request, int $id, EmailNotificationService $service): RedirectResponse
@@ -71,7 +71,7 @@ class EmailTemplateController extends Controller
 
         $sent = $service->sendTest((string) $template->key, $data['email']);
 
-        return redirect('/admin/email-templates')->with(
+        return redirect('/admin/maintenance/email-templates')->with(
             $sent ? 'success' : 'error',
             $sent
                 ? 'Test email sent to '.$data['email'].'.'
@@ -87,7 +87,7 @@ class EmailTemplateController extends Controller
 
         $this->persistSettings(['sending_enabled' => $enabled]);
 
-        return redirect('/admin/email-templates')->with(
+        return redirect('/admin/maintenance/email-templates')->with(
             'success',
             $enabled ? 'Email sending is now ON.' : 'Email sending is now OFF.'
         );
@@ -105,7 +105,7 @@ class EmailTemplateController extends Controller
 
         $this->persistSettings(['testing_email' => $testingEmail !== '' ? $testingEmail : null]);
 
-        return redirect('/admin/email-templates')->with(
+        return redirect('/admin/maintenance/email-templates')->with(
             'success',
             $testingEmail !== ''
                 ? 'Testing email set — while sending is OFF, all notifications go to '.$testingEmail.'.'

@@ -57,7 +57,9 @@ function pay(invoice) {
             </thead>
             <tbody class="divide-y divide-slate-100">
                 <tr v-for="i in invoices" :key="i.crm_id" class="hover:bg-slate-50">
-                    <td class="px-3 py-2 font-mono text-xs text-slate-600">{{ i.invoice_number || '—' }}
+                    <td class="px-3 py-2 font-mono text-xs text-slate-600">
+                        <a v-if="i.invoice_number" :href="`/web/invoices/${i.crm_id}/download`" class="text-indigo-600 hover:underline" :title="`Download invoice ${i.invoice_number} (PDF)`">{{ i.invoice_number }}</a>
+                        <span v-else>—</span>
                         <p v-if="i.description" class="whitespace-pre-line font-sans text-xs text-slate-500">{{ i.description }}</p>
                     </td>
                     <td class="px-3 py-2 font-mono text-xs text-slate-600">{{ i.application_reference || '—' }}</td>

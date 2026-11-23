@@ -2,6 +2,7 @@
 import { Head, router, useForm, usePage } from '@inertiajs/vue3'
 import { computed, ref } from 'vue'
 import RichTextEditor from '../../Components/RichTextEditor.vue'
+import MaintenanceMenu from '../../Components/MaintenanceMenu.vue'
 
 const props = defineProps({
     templates: { type: Array, default: () => [] },
@@ -14,7 +15,7 @@ const flash = computed(() => page.props.flash || {})
 
 // Master switch — toggling posts immediately.
 const toggleSending = () => {
-    router.patch('/admin/email-templates/toggle', { sending_enabled: !props.sendingEnabled }, {
+    router.patch('/admin/maintenance/email-templates/toggle', { sending_enabled: !props.sendingEnabled }, {
         preserveScroll: true,
     })
 }
@@ -25,7 +26,7 @@ const settingsForm = useForm({
 })
 
 const saveTestingEmail = () => {
-    settingsForm.patch('/admin/email-templates/settings', {
+    settingsForm.patch('/admin/maintenance/email-templates/settings', {
         preserveScroll: true,
     })
 }
@@ -59,7 +60,7 @@ const cancelEdit = () => {
 }
 
 const save = (t) => {
-    form.put(`/admin/email-templates/${t.id}`, {
+    form.put(`/admin/maintenance/email-templates/${t.id}`, {
         preserveScroll: true,
         onSuccess: () => { editingId.value = null },
     })
@@ -87,7 +88,7 @@ const sendTest = () => {
     if (!testTemplate.value) {
         return
     }
-    testForm.post(`/admin/email-templates/${testTemplate.value.id}/test`, {
+    testForm.post(`/admin/maintenance/email-templates/${testTemplate.value.id}/test`, {
         preserveScroll: true,
         onSuccess: () => closeTest(),
     })
@@ -103,6 +104,7 @@ const placeholder = (name) => `{{${name}}}`
 <template>
     <Head title="Email Templates" />
 
+    <MaintenanceMenu>
     <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
             <h1 class="text-2xl font-bold text-slate-800">Email Templates</h1>
@@ -328,4 +330,5 @@ const placeholder = (name) => `{{${name}}}`
             </form>
         </div>
     </div>
+    </MaintenanceMenu>
 </template>

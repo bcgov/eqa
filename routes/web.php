@@ -15,6 +15,7 @@ use Modules\Admin\Http\Controllers\EmailTemplateController;
 use Modules\Admin\Http\Controllers\EqaRegistryReportController;
 use Modules\Admin\Http\Controllers\InstitutionController;
 use Modules\Admin\Http\Controllers\InvoiceController;
+use Modules\Admin\Http\Controllers\MaintenanceController;
 use Modules\Admin\Http\Controllers\ReportController;
 use Modules\Admin\Http\Controllers\StaffController;
 use Modules\Web\Http\Controllers\PaymentController;
@@ -83,6 +84,7 @@ Route::prefix('web')->middleware('is.active:institution')->group(function () {
     Route::get('/users', [WebPortalController::class, 'users'])->name('web.users');
     Route::put('/users/{userId}/role', [WebPortalController::class, 'updateStaffRole'])->name('web.users.role');
     Route::get('/invoices', [PaymentController::class, 'invoices'])->name('web.invoices');
+    Route::get('/invoices/{crmId}/download', [PaymentController::class, 'download'])->name('web.invoices.download');
     Route::post('/invoices/{crmId}/pay', [PaymentController::class, 'pay'])->name('web.invoices.pay');
 
     // Browse any captured Web page by name (raw migrated views).
@@ -182,13 +184,21 @@ Route::get('/admin/reports', [ReportController::class, 'index'])->name('admin.re
 Route::get('/admin/reports/{report}', [ReportController::class, 'show'])->name('admin.report.show');
 Route::get('/admin/reports/{report}/csv', [ReportController::class, 'export'])->name('admin.report.export');
 
-// Ministry email templates (migrated CRM notification emails) + global master
-// switch for email sending (default OFF). Ministry Admins only.
+// Maintenance (Ministry Admins only): Utils (application settings), Email Templates (migrated CRM
+// notification emails + global sending switch, default OFF) and the Invoice wording.
 Route::middleware('role:'.Role::MINISTRY_ADMIN.','.Role::SUPER_ADMIN)->group(function () {
-    Route::get('/admin/email-templates', [EmailTemplateController::class, 'index'])->name('admin.email-templates');
-    Route::patch('/admin/email-templates/toggle', [EmailTemplateController::class, 'toggle'])->name('admin.email-templates.toggle');
-    Route::patch('/admin/email-templates/settings', [EmailTemplateController::class, 'settings'])->name('admin.email-templates.settings');
-    Route::put('/admin/email-templates/{id}', [EmailTemplateController::class, 'update'])->name('admin.email-templates.update');
-    Route::post('/admin/email-templates/{id}/test', [EmailTemplateController::class, 'sendTest'])->name('admin.email-templates.test');
+    Route::redirect('/admin/maintenance', '/admin/maintenance/utils');
+    Route::get('/admin/maintenance/utils', [MaintenanceController::class, 'utils'])->name('admin.maintenance.utils');
+    Route::put('/admin/maintenance/utils/{util}', [MaintenanceController::class, 'updateUtil'])->name('admin.maintenance.utils.update');
+
+    Route::redirect('/admin/email-templates', '/admin/maintenance/email-templates');
+    Route::get('/admin/maintenance/email-templates', [EmailTemplateController::class, 'index'])->name('admin.email-templates');
+    Route::patch('/admin/maintenance/email-templates/toggle', [EmailTemplateController::class, 'toggle'])->name('admin.email-templates.toggle');
+    Route::patch('/admin/maintenance/email-templates/settings', [EmailTemplateController::class, 'settings'])->name('admin.email-templates.settings');
+    Route::put('/admin/maintenance/email-templates/{id}', [EmailTemplateController::class, 'update'])->name('admin.email-templates.update');
+    Route::post('/admin/maintenance/email-templates/{id}/test', [EmailTemplateController::class, 'sendTest'])->name('admin.email-templates.test');
+
+    Route::get('/admin/maintenance/invoice', [MaintenanceController::class, 'invoice'])->name('admin.maintenance.invoice');
+    Route::get('/admin/maintenance/invoice/preview', [MaintenanceController::class, 'previewInvoice'])->name('admin.maintenance.invoice.preview');
 });
 });

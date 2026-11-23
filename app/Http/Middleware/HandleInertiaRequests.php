@@ -41,6 +41,13 @@ class HandleInertiaRequests extends Middleware
             ],
             // Federated (Keycloak) logout URL captured at PDEX login.
             'logoutUrl' => $request->session()->get('kc_logout_uri'),
+            // Admin-maintained display settings (Maintenance > Utils).
+            'settings' => [
+                'ministry_name' => config('eqa.ministry.name'),
+                'program_name' => config('eqa.ministry.program'),
+                'contact_email' => config('eqa.ministry.email'),
+                'privacy_email' => config('eqa.ministry.privacy_email'),
+            ],
         ];
     }
 }

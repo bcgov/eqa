@@ -1,7 +1,12 @@
 <script setup>
+import { usePage } from '@inertiajs/vue3'
+import { computed } from 'vue'
 import SvgBcLogo from './SvgBcLogo.vue'
 
-// Mirrors the B.C. Design System footer used by bcgov/pdex.
+// Mirrors the B.C. Design System footer used by bcgov/pdex. Ministry details come from Maintenance > Utils.
+const settings = computed(() => usePage().props.settings || {})
+const ministryName = computed(() => settings.value.ministry_name || 'Ministry of Post-Secondary Education and Future Skills')
+const privacyEmail = computed(() => settings.value.privacy_email || 'PSFS.InformationPrivacy@gov.bc.ca')
 const links = [
     { href: 'https://www2.gov.bc.ca/gov/content/home', text: 'Home' },
     { href: 'https://www2.gov.bc.ca/gov/content?id=3C4F47288DFB454987435AB5EFEFBB7F', text: 'About gov.bc.ca' },
@@ -19,8 +24,8 @@ const copyright = `© ${new Date().getUTCFullYear()} Government of British Colum
         <div class="bcds-footer--acknowledgement">
             <div class="bcds-footer--acknowledgement-text">
                 <p>
-                    Your personal information is collected, used and disclosed by the Ministry
-                    of Post-Secondary Education and Future Skills under the Freedom of
+                    Your personal information is collected, used and disclosed by the {{ ministryName }}
+                    under the Freedom of
                     Information and Protection of Privacy Act (FOIPPA) sections 26(c) and
                     26(e). The information you provide will be shared with the program
                     administration you choose to apply to through this portal. It will be used
@@ -28,7 +33,7 @@ const copyright = `© ${new Date().getUTCFullYear()} Government of British Colum
                     administering financial assistance, and supporting program planning and
                     evaluation. If you have any questions about the collection of this
                     information, please contact: Ministry Privacy Officer,
-                    PSFS.InformationPrivacy@gov.bc.ca
+                    {{ privacyEmail }}
                 </p>
                 <br />
                 <p>

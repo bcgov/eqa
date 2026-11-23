@@ -111,7 +111,7 @@ const affirmations = computed(() => [
                         <td class="py-2 text-slate-700">{{ feeLabels[i.fee_type] || 'Fees' }}
                             <p v-if="i.description" class="whitespace-pre-line text-xs text-slate-500">{{ i.description }}</p>
                         </td>
-                        <td class="py-2 font-mono text-xs text-slate-600">{{ i.invoice_number }}</td>
+                        <td class="py-2 font-mono text-xs"><a :href="`/web/invoices/${i.crm_id}/download`" class="text-indigo-600 hover:underline" :title="`Download invoice ${i.invoice_number} (PDF)`">{{ i.invoice_number }}</a></td>
                         <td class="py-2 text-slate-600">{{ dash(i.due_date) }}</td>
                         <td class="py-2 text-right text-slate-800">{{ currency(i.total_charges) }}</td>
                         <td class="py-2 pl-6 text-slate-600">{{ i.invoice_status }}</td>

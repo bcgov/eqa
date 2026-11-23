@@ -6,6 +6,7 @@ namespace Modules\Web\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Services\ExpressPayService;
+use App\Services\InvoicePdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -50,6 +51,24 @@ class PaymentController extends Controller
             'institution' => $institution,
             'invoices' => $invoices,
             'canPayOnline' => $this->canPay($request),
+        ]);
+    }
+
+    /** The institution's own invoice as a PDF document. */
+    public function download(Request $request, string $crmId, InvoicePdf $pdf): SymfonyResponse
+    {
+        $institution = $this->institution($request);
+        abort_if($institution === null, 403);
+
+        $invoice = DB::table('invoices')
+            ->where('crm_id', $crmId)
+            ->where('institution_crm_id', $institution->crm_id)
+            ->first();
+        abort_if($invoice === null, 404);
+
+        return response($pdf->render($invoice), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="'.$pdf->filename($invoice).'"',
         ]);
     }
 
