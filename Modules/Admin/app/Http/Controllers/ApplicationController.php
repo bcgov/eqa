@@ -81,6 +81,7 @@ class ApplicationController extends Controller
             'invoices' => DB::table('invoices')->where('application_crm_id', $crmId)->orderBy('invoice_number')->get()
                 ->each(fn (object $invoice) => $invoice->payment_under_review = app(ExpressPayService::class)->hasPaymentUnderReview((string) $invoice->crm_id)),
             'adminFeeQuote' => app(ApplicationFeeService::class)->adminFeeQuote(DB::table('applications')->where('crm_id', $crmId)->first()),
+            'defaultChangesDueDate' => app(ApplicationFeeService::class)->defaultChangesDueDate(),
             'qaMetThrough' => $qaMetThrough,
         ]);
     }

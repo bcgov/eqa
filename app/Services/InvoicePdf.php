@@ -26,7 +26,8 @@ class InvoicePdf
         'contact_email', 'program_name', 'ministry_name',
     ];
 
-    public function render(object $invoice): string
+    /** Invoice PDF, or with $receipt the payment receipt for a paid invoice. */
+    public function render(object $invoice, bool $receipt = false): string
     {
         $institution = $invoice->institution_crm_id && Schema::hasTable('institutions')
             ? DB::table('institutions')->where('crm_id', $invoice->institution_crm_id)->first()
@@ -41,13 +42,16 @@ class InvoicePdf
             'program_name' => (string) config('eqa.ministry.program'),
             'ministry_name' => (string) config('eqa.ministry.name'),
         ];
+        $paid = round((float) ($invoice->payment_amount ?? 0), 2);
 
         $html = view('invoices.invoice', [
             'invoice' => $invoice,
+            'receipt' => $receipt,
             'title' => self::FEE_LABELS[$invoice->fee_type ?? ''] ?? 'EQA Fees',
             'billTo' => $this->billTo($invoice, $institution),
             'lines' => $this->lines($invoice),
-            'paid' => round((float) ($invoice->payment_amount ?? 0), 2),
+            // Payments recorded before payment_amount was kept: a paid invoice was paid in full.
+            'paid' => $receipt && $paid <= 0 ? round((float) ($invoice->total_charges ?? 0), 2) : $paid,
             'balance' => round((float) ($invoice->invoice_balance ?? $invoice->total_charges ?? 0), 2),
             'date' => $date,
             'money' => fn ($value): string => '$'.number_format((float) ($value ?? 0), 2),
@@ -56,7 +60,7 @@ class InvoicePdf
                 preg_split('/\R/', (string) config('eqa.ministry.address')) ?: [],
             ))),
             'issuerEmail' => config('eqa.ministry.email'),
-            'text' => collect(['title', 'payment_online', 'payment_offline', 'due_text', 'paid_message', 'notes', 'footer'])
+            'text' => collect(['title', 'payment_online', 'payment_offline', 'due_text', 'paid_message', 'notes', 'footer', 'receipt_title', 'receipt_message'])
                 ->mapWithKeys(fn (string $key) => [$key => $this->fill((string) config('eqa.invoice.'.$key), $tokens)])
                 ->all(),
             'seal' => 'data:image/png;base64,'.base64_encode((string) file_get_contents(resource_path('images/eqa-seal.png'))),
@@ -74,9 +78,27 @@ class InvoicePdf
         return (string) $dompdf->output();
     }
 
-    public function filename(object $invoice): string
+    public function feeLabel(object $invoice): string
     {
-        return 'EQA_Invoice_'.(preg_replace('/[^A-Za-z0-9-]/', '', (string) ($invoice->invoice_number ?? '')) ?: 'invoice').'.pdf';
+        return self::FEE_LABELS[$invoice->fee_type ?? ''] ?? 'EQA Fees';
+    }
+
+    public function filename(object $invoice, bool $receipt = false): string
+    {
+        return ($receipt ? 'EQA_Receipt_' : 'EQA_Invoice_').(preg_replace('/[^A-Za-z0-9-]/', '', (string) ($invoice->invoice_number ?? '')) ?: 'invoice').'.pdf';
+    }
+
+    /** The sample invoice after an online payment, used to preview the receipt. */
+    public function sampleReceipt(): object
+    {
+        return (object) array_merge((array) $this->sample(), [
+            'invoice_status' => 'Paid',
+            'invoice_balance' => 0,
+            'payment_amount' => 3080,
+            'payment_received_date' => Carbon::now('America/Vancouver')->toDateString(),
+            'payment_method' => 'Express Pay',
+            'transaction_reference' => '10000001',
+        ]);
     }
 
     /** A made-up unpaid invoice used to preview the wording under Maintenance > Invoice. */

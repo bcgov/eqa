@@ -85,6 +85,7 @@ Route::prefix('web')->middleware('is.active:institution')->group(function () {
     Route::put('/users/{userId}/role', [WebPortalController::class, 'updateStaffRole'])->name('web.users.role');
     Route::get('/invoices', [PaymentController::class, 'invoices'])->name('web.invoices');
     Route::get('/invoices/{crmId}/download', [PaymentController::class, 'download'])->name('web.invoices.download');
+    Route::get('/invoices/{crmId}/receipt', [PaymentController::class, 'downloadReceipt'])->name('web.invoices.receipt');
     Route::post('/invoices/{crmId}/pay', [PaymentController::class, 'pay'])->name('web.invoices.pay');
 
     // Browse any captured Web page by name (raw migrated views).

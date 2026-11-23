@@ -187,8 +187,8 @@ class RedBoxWorkflowTest extends TestCase
         ])->assertSessionHas('success');
 
         $application = $this->application($id);
-        $this->assertSame('Draft', $application->status);
-        $this->assertSame('draft', $application->workflow_stage);
+        $this->assertSame('Additional Information Required', $application->status);
+        $this->assertSame('changes_requested', $application->workflow_stage);
         $this->assertEquals(1, $application->need_additional_details);
         $this->assertSame(Carbon::now('America/Vancouver')->addDays(30)->toDateString(), $application->changes_due_date);
         $this->assertNotified('application_changes_requested', 'Upload the current EQA policy manual.');
@@ -202,7 +202,7 @@ class RedBoxWorkflowTest extends TestCase
         $this->assertEquals(250, $application->total_enrolment);
     }
 
-    public function test_open_application_for_changes_expires_when_not_resubmitted(): void
+    public function test_open_application_for_changes_awaits_expiry_confirmation_when_not_resubmitted(): void
     {
         $id = $this->applicationAt('under_review', 'Under Review');
         $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'request_changes', 'changes' => 'Missing info.']);
@@ -210,7 +210,7 @@ class RedBoxWorkflowTest extends TestCase
         $this->travel(31)->days();
         $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
 
-        $this->assertSame('Expired', $this->application($id)->status);
+        $this->assertSame('Pending Admin Confirm Expiry', $this->application($id)->status);
     }
 
     public function test_approve_with_compliance_order(): void

@@ -11,14 +11,14 @@ class EnforceApplicationDeadlinesCommand extends Command
 {
     protected $signature = 'eqa:enforce-deadlines';
 
-    protected $description = 'Expire applications whose admin fee, requested changes or appeal fee are past due.';
+    protected $description = 'Expire applications whose admin fee or appeal fee is past due; flag missed resubmission deadlines for the ministry to confirm.';
 
     public function handle(ApplicationFeeService $fees): int
     {
         $counts = $fees->enforceDeadlines();
 
         $this->info(sprintf(
-            'Deadlines enforced — admin fee expired: %d, change requests expired: %d, appeals lapsed: %d.',
+            'Deadlines enforced — admin fee expired: %d, change requests awaiting expiry confirmation: %d, appeals lapsed: %d.',
             $counts['admin_fee'],
             $counts['changes'],
             $counts['appeal'],

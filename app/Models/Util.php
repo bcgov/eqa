@@ -39,6 +39,8 @@ class Util extends Model
         'invoice_paid_message' => 'eqa.invoice.paid_message',
         'invoice_notes' => 'eqa.invoice.notes',
         'invoice_footer' => 'eqa.invoice.footer',
+        'invoice_receipt_title' => 'eqa.invoice.receipt_title',
+        'invoice_receipt_message' => 'eqa.invoice.receipt_message',
     ];
 
     /** @var array<string, mixed>|null config defaults captured before the first override */

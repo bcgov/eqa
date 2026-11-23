@@ -59,6 +59,46 @@ class InvoiceDownloadTest extends TestCase
         $crmId = $this->invoice(self::OTHER_INSTITUTION, ['invoice_number' => 'INV-00000099']);
 
         $this->asInstitution()->get("/web/invoices/{$crmId}/download")->assertNotFound();
+        $this->asInstitution()->get("/web/invoices/{$crmId}/receipt")->assertNotFound();
+    }
+
+    public function test_receipt_is_only_available_once_the_invoice_is_paid(): void
+    {
+        $unpaid = $this->invoice(self::INSTITUTION, ['invoice_number' => 'INV-00000050']);
+        $paid = $this->invoice(self::INSTITUTION, [
+            'invoice_number' => 'INV-00000051',
+            'invoice_status' => 'Paid',
+            'invoice_balance' => 0,
+            'payment_amount' => 7500,
+            'payment_received_date' => '2026-11-20',
+            'payment_method' => 'EFT',
+        ]);
+
+        $this->asInstitution()->get("/web/invoices/{$unpaid}/receipt")->assertNotFound();
+
+        $response = $this->asInstitution()->get("/web/invoices/{$paid}/receipt")->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        $this->assertStringContainsString('EQA_Receipt_INV-00000051.pdf', (string) $response->headers->get('Content-Disposition'));
+
+        $data = $this->viewData(fn () => $this->asInstitution()->get("/web/invoices/{$paid}/receipt"));
+        $html = view('invoices.invoice', $data)->render();
+        $this->assertTrue($data['receipt']);
+        $this->assertStringContainsString('RECEIPT', $html);
+        $this->assertStringContainsString('Received from', $html);
+        $this->assertStringContainsString('November 20, 2026', $html);
+        $this->assertStringContainsString('Amount paid (CAD)', $html);
+        $this->assertStringNotContainsString('How to pay', $html);
+    }
+
+    /** @return array<string, mixed> */
+    private function viewData(callable $request): array
+    {
+        $data = null;
+        view()->composer('invoices.invoice', function ($view) use (&$data): void {
+            $data ??= $view->getData();
+        });
+        $request();
+
+        return $data;
     }
 
     private function renderedHtml(string $crmId): string

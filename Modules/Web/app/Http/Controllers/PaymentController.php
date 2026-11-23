@@ -72,6 +72,25 @@ class PaymentController extends Controller
         ]);
     }
 
+    /** The institution's payment receipt for a paid invoice, as a PDF. */
+    public function downloadReceipt(Request $request, string $crmId, InvoicePdf $pdf): SymfonyResponse
+    {
+        $institution = $this->institution($request);
+        abort_if($institution === null, 403);
+
+        $invoice = DB::table('invoices')
+            ->where('crm_id', $crmId)
+            ->where('institution_crm_id', $institution->crm_id)
+            ->first();
+        abort_if($invoice === null, 404);
+        abort_unless($invoice->invoice_status === 'Paid', 404, 'A receipt is available once the invoice is paid.');
+
+        return response($pdf->render($invoice, true), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="'.$pdf->filename($invoice, true).'"',
+        ]);
+    }
+
     public function pay(Request $request, string $crmId): SymfonyResponse
     {
         abort_unless($this->canPay($request), 403);

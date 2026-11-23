@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Modules\Admin\Services;
 
+use App\Services\InvoicePdf;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -232,7 +233,7 @@ class ProcessNotifier
     // Payment / appeal workflow (flowchart DRAFT V1.1).
     // ---------------------------------------------------------------------
 
-    /** "Send email to Inst. for missing information" when an application is reopened as Draft. */
+    /** "Send email to Inst. for missing information" when the ministry requests additional information. */
     public function changesRequested(object $institution, object $application, string $changes, string $dueDate): void
     {
         $contact = $this->contact($institution);
@@ -262,6 +263,48 @@ class ProcessNotifier
             'invoice_description' => (string) ($invoice->description ?? ''),
             'due_date' => (string) ($invoice->due_date ?? ''),
         ], $contact['email'] ?: null, ['institution_crm_id' => $institution->crm_id ?? null]);
+    }
+
+    /**
+     * "Payment Receipt": acknowledges a paid invoice to the institution with the receipt PDF
+     * attached. Sent once per invoice; zero-amount invoices (nothing was paid) are skipped.
+     */
+    public function paymentReceipt(object $institution, object $invoice, ?object $application = null): void
+    {
+        $total = (float) ($invoice->total_charges ?? 0);
+        $number = (string) ($invoice->invoice_number ?? '');
+        if ($total <= 0 || $number === '' || ($invoice->invoice_status ?? null) !== 'Paid') {
+            return;
+        }
+
+        $alreadySent = Schema::hasTable('sent_emails') && DB::table('sent_emails')
+            ->where('template_key', 'payment_receipt')
+            ->where('status', 'sent')
+            ->where('body', 'like', '%'.$number.'%')
+            ->exists();
+        if ($alreadySent) {
+            return;
+        }
+
+        $pdf = app(InvoicePdf::class);
+        $contact = $this->contact($institution);
+        $paid = (float) ($invoice->payment_amount ?? 0) > 0 ? (float) $invoice->payment_amount : $total;
+
+        $this->emails->send('payment_receipt', [
+            'contact_name' => $contact['name'] !== '' ? $contact['name'] : 'Applicant',
+            'institution_name' => (string) ($institution->name ?? $invoice->institution_name ?? ''),
+            'invoice_number' => $number,
+            'fee_description' => $pdf->feeLabel($invoice),
+            'amount_paid' => '$'.number_format($paid, 2),
+            'payment_date' => (string) ($invoice->payment_received_date ?? ''),
+            'payment_method' => (string) ($invoice->payment_method ?? ''),
+            'transaction_reference' => (string) (($invoice->transaction_reference ?? null) ?: '—'),
+            'application_reference' => (string) ($invoice->application_reference ?? $application->reference ?? ''),
+        ], $contact['email'] ?: null, ['institution_crm_id' => $institution->crm_id ?? null], [[
+            'data' => $pdf->render($invoice, true),
+            'name' => $pdf->filename($invoice, true),
+            'mime' => 'application/pdf',
+        ]]);
     }
 
     /** "Send appeal application confirmation and payment receipt email". */

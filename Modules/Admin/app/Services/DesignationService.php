@@ -51,8 +51,8 @@ class DesignationService
      * good-standing copy should track the institution's current standing.
      */
     private const OPEN_STAGES = [
-        'draft', 'fee_required', 'fees_payment', 'pending_review', 'under_review',
-        'application_approval', 'suitability_review', 'not_approved', 'non_approval_reasons',
+        'draft', 'fee_required', 'fees_payment', 'pending_review', 'under_review', 'changes_requested',
+        'application_approval', 'suitability_review', 'not_approved', 'non_approval_reasons', 'pending_expiry',
     ];
 
     public static function standingIsGood(?string $standing): bool

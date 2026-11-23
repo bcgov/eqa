@@ -67,8 +67,9 @@ class EmailNotificationService
      *
      * @param  array<string, scalar|null>  $vars
      * @param  array<string, scalar|null>  $meta
+     * @param  array<int, array{data: string, name: string, mime: string}>  $attachments
      */
-    public function send(string $key, array $vars = [], ?string $to = null, array $meta = []): bool
+    public function send(string $key, array $vars = [], ?string $to = null, array $meta = [], array $attachments = []): bool
     {
         $settings = $this->settings();
         $sendingEnabled = (bool) ($settings->sending_enabled ?? false);
@@ -112,8 +113,11 @@ class EmailNotificationService
         $body = $this->render((string) $template->body, $vars);
 
         try {
-            Mail::html($body, function ($message) use ($recipient, $subject): void {
+            Mail::html($body, function ($message) use ($recipient, $subject, $attachments): void {
                 $message->to($recipient)->subject($subject);
+                foreach ($attachments as $file) {
+                    $message->attachData($file['data'], $file['name'], ['mime' => $file['mime']]);
+                }
             });
 
             $this->log($key, $template, $subject, $body, $recipient, $redirected ? $intended : null, 'sent', null, $meta);

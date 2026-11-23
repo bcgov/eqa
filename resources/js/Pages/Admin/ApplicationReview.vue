@@ -1,6 +1,7 @@
 <script setup>
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3'
 import { ref, computed } from 'vue'
+import ManualPaymentForm from '../../Components/ManualPaymentForm.vue'
 
 const props = defineProps({
     application: { type: Object, default: () => ({}) },
@@ -8,6 +9,7 @@ const props = defineProps({
     invoices: { type: Array, default: () => [] },
     adminFeeQuote: { type: Object, default: () => ({ amount: 0, description: '' }) },
     qaMetThrough: { type: String, default: null },
+    defaultChangesDueDate: { type: String, default: '' },
 })
 
 const page = usePage()
@@ -25,12 +27,13 @@ const showPtiru = computed(() => {
 const stage = computed(() => props.application.workflow_stage || 'draft')
 
 const stageIndex = {
-    draft: 0, fee_required: 1, fees_payment: 2, pending_review: 3, under_review: 4,
+    draft: 0, fee_required: 1, fees_payment: 2, pending_review: 3, under_review: 4, changes_requested: 4,
     application_approval: 5, not_approved: 5, non_approval_reasons: 5, suitability_review: 5,
-    admin_fee: 5, appeal_payment: 5, appeal_review: 5, end: 6,
+    admin_fee: 5, appeal_payment: 5, appeal_review: 5, pending_expiry: 5, end: 6,
 }
 const activeIndex = computed(() => stageIndex[stage.value] ?? 0)
 const decisionLabel = computed(() => {
+    if (stage.value === 'pending_expiry') return 'Pending Admin Confirm Expiry'
     if (['not_approved', 'non_approval_reasons'].includes(stage.value)) return 'Not Approved'
     if (stage.value === 'suitability_review') return 'Suitability Review'
     if (stage.value === 'application_approval') return 'Application Approval'
@@ -40,8 +43,11 @@ const decisionLabel = computed(() => {
     if (stage.value === 'end') return (props.application.status || '').startsWith('Approved') ? 'Application Approval' : 'Not Approved'
     return 'Decision'
 })
-const steps = computed(() => ['Draft Application', 'Application Fee Required', 'Fee Payment', 'Pending Review', 'Under Review', decisionLabel.value, 'End Process'])
-const paymentMethod = ref('EFT')
+const steps = computed(() => [
+    'Draft Application', 'Application Fee Required', 'Fee Payment', 'Pending Review',
+    stage.value === 'changes_requested' ? 'Additional Information Required' : 'Under Review',
+    decisionLabel.value, 'End Process',
+])
 
 const notApproved = computed(() => ['Not Approved', 'Declined', 'Expired'].includes(props.application.status))
 
@@ -49,6 +55,16 @@ const eqaGood = ref(props.application.eqa_good_standing ?? true)
 const ptibGood = ref(props.application.ptib_good_standing ?? true)
 const reasons = ref(props.application.non_approval_reasons || '')
 const changes = ref('')
+const changesDueDate = ref(props.defaultChangesDueDate)
+const tomorrow = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10) })()
+// Extending: start from the current deadline when it is still ahead, otherwise from the default.
+const newDueDate = ref(props.application.changes_due_date && props.application.changes_due_date >= tomorrow ? props.application.changes_due_date : props.defaultChangesDueDate)
+const errors = computed(() => page.props.errors || {})
+function confirmExpiry() {
+    if (confirm(`Expire ${props.application.reference}? The institution missed its resubmission deadline (${props.application.changes_due_date || '—'}). This closes the application.`)) {
+        advance('confirm_expiry')
+    }
+}
 const complianceOrder = ref(false)
 const complianceNotes = ref('')
 const approval = () => ({ compliance_order: complianceOrder.value, compliance_order_notes: complianceNotes.value })
@@ -137,7 +153,7 @@ function yesNo(v) {
 }
 
 const statusClass = computed(() => {
-    if (notApproved.value) return 'bg-red-100 text-red-700'
+    if (notApproved.value || stage.value === 'pending_expiry') return 'bg-red-100 text-red-700'
     if ((props.application.status || '').startsWith('Approved')) return 'bg-green-100 text-green-700'
     return 'bg-amber-100 text-amber-700'
 })
@@ -204,8 +220,38 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
         <h2 class="mb-3 text-sm font-semibold text-indigo-900">Next step</h2>
 
         <div v-if="stage === 'draft'">
-            <p v-if="application.need_additional_details" class="text-sm text-slate-600">Reopened for changes. Waiting for the institution to resubmit by {{ application.changes_due_date || '—' }}.</p>
-            <p v-else class="text-sm text-slate-600">The application is a draft. The institution must submit it before the review process begins.</p>
+            <p class="text-sm text-slate-600">The application is a draft. The institution must submit it before the review process begins.</p>
+        </div>
+
+        <div v-else-if="stage === 'changes_requested'">
+            <p class="mb-3 text-sm text-slate-600">Additional information requested. Waiting for the institution to resubmit by <b>{{ application.changes_due_date || '—' }}</b>.</p>
+            <p v-if="application.changes_requested" class="mb-3 whitespace-pre-line rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600"><b>Information requested:</b> {{ application.changes_requested }}</p>
+            <form class="flex flex-wrap items-end gap-2" @submit.prevent="advance('extend_changes', { changes_due_date: newDueDate })">
+                <label class="text-sm text-slate-600">Change resubmission deadline
+                    <input v-model="newDueDate" type="date" :min="tomorrow" required class="mt-1 block rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:border-slate-500 focus:outline-none" />
+                </label>
+                <button type="submit" :disabled="busy || newDueDate === application.changes_due_date" :class="[btn, 'bg-slate-600 hover:bg-slate-700']">Update Deadline</button>
+                <span v-if="errors.changes_due_date" class="w-full text-xs text-red-600">{{ errors.changes_due_date }}</span>
+            </form>
+            <p class="mt-2 text-xs text-slate-500">The institution is emailed the new date.</p>
+        </div>
+
+        <div v-else-if="stage === 'pending_expiry'">
+            <p class="mb-3 text-sm text-red-700">
+                The institution did not resubmit by the deadline (<b>{{ application.changes_due_date || '—' }}</b>). Confirm the expiry to close the application,
+                or set a new deadline to reopen it for the institution.
+            </p>
+            <p v-if="application.changes_requested" class="mb-3 whitespace-pre-line rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600"><b>Changes requested:</b> {{ application.changes_requested }}</p>
+            <div class="flex flex-wrap items-end gap-3">
+                <button type="button" :disabled="busy" @click="confirmExpiry" :class="[btn, 'bg-red-600 hover:bg-red-700']">Confirm Expiry</button>
+                <form class="flex flex-wrap items-end gap-2" @submit.prevent="advance('extend_changes', { changes_due_date: newDueDate })">
+                    <label class="text-sm text-slate-600">New resubmission deadline
+                        <input v-model="newDueDate" type="date" :min="tomorrow" required class="mt-1 block rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:border-slate-500 focus:outline-none" />
+                    </label>
+                    <button type="submit" :disabled="busy" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Extend Deadline &amp; Reopen</button>
+                </form>
+                <span v-if="errors.changes_due_date" class="w-full text-xs text-red-600">{{ errors.changes_due_date }}</span>
+            </div>
         </div>
 
         <div v-else-if="stage === 'fee_required'">
@@ -216,22 +262,14 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
                 An online payment moves the application to Fee Payment automatically.
             </p>
             <p class="mb-3 text-sm text-amber-700">Record a payment only if it was received another way, such as EFT or cheque.</p>
-            <div class="flex flex-wrap items-end gap-2">
-                <label class="text-sm text-slate-600">Payment method
-                    <select v-model="paymentMethod" class="ml-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm">
-                        <option>EFT</option>
-                        <option>Cheque</option>
-                        <option>Other</option>
-                    </select>
-                </label>
-                <button :disabled="busy" @click="advance('record_payment', { payment_method: paymentMethod })" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Record Payment →</button>
-            </div>
+            <ManualPaymentForm label="Record Payment →" :busy="busy" @submit="(p) => advance('record_payment', p)" />
         </div>
 
         <div v-else-if="stage === 'fees_payment'">
             <p v-if="applicationFeeInvoice" class="mb-3 text-sm text-slate-600">
-                The {{ feeLabels[applicationFeeInvoice.fee_type] }} was paid ({{ applicationFeeInvoice.payment_method || 'Express Pay' }}, ref {{ applicationFeeInvoice.transaction_reference || '—' }}). Confirm the payment to move the application to Pending Review.
+                The {{ feeLabels[applicationFeeInvoice.fee_type] }} was paid ({{ applicationFeeInvoice.payment_method || 'Express Pay' }}<template v-if="applicationFeeInvoice.payment_received_date"> on {{ applicationFeeInvoice.payment_received_date }}</template>, ref {{ applicationFeeInvoice.transaction_reference || '—' }}). Confirm the payment to move the application to Pending Review.
             </p>
+            <p v-if="applicationFeeInvoice?.payment_notes" class="mb-3 whitespace-pre-line rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600"><b>Payment notes:</b> {{ applicationFeeInvoice.payment_notes }}</p>
             <p v-else class="mb-3 text-sm text-slate-600">The application fee was recorded. Confirm the payment to move the application to Pending Review.</p>
             <button :disabled="busy" @click="advance('confirm_payment')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Confirm Payment →</button>
         </div>
@@ -253,9 +291,16 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
                 <button :disabled="busy" @click="advance('refer_suitability')" :class="[btn, 'bg-amber-500 hover:bg-amber-600']">Refer to Suitability Review</button>
             </div>
             <div class="mt-5 border-t border-indigo-100 pt-4">
-                <p class="mb-2 text-sm text-slate-600">Application incomplete? Reopen it as a Draft and tell the institution what is missing.</p>
+                <p class="mb-2 text-sm text-slate-600">Application incomplete? Return it to the institution (status <b>Additional Information Required</b>) and tell them what is missing.</p>
                 <textarea v-model="changes" rows="2" placeholder="Information required from the institution…" class="mb-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"></textarea>
-                <button :disabled="busy || !changes.trim()" @click="advance('request_changes', { changes })" :class="[btn, 'bg-slate-600 hover:bg-slate-700']">Open Application for Changes</button>
+                <div class="flex flex-wrap items-end gap-2">
+                    <label class="text-sm text-slate-600">Resubmit by
+                        <input v-model="changesDueDate" type="date" :min="tomorrow" class="mt-1 block rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:border-slate-500 focus:outline-none" />
+                    </label>
+                    <button :disabled="busy || !changes.trim()" @click="advance('request_changes', { changes, changes_due_date: changesDueDate })" :class="[btn, 'bg-slate-600 hover:bg-slate-700']">Request Additional Information</button>
+                </div>
+                <p class="mt-1 text-xs text-slate-500">Defaults to the standard timeframe from Maintenance &gt; Utils; change it for this application if needed.</p>
+                <p v-if="errors.changes_due_date" class="mt-1 text-xs text-red-600">{{ errors.changes_due_date }}</p>
             </div>
         </div>
 
@@ -286,12 +331,12 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
 
         <div v-else-if="stage === 'admin_fee'">
             <p class="mb-3 text-sm text-slate-600">Approved. Waiting for the institution to pay the administrative fee. Confirm a payment received outside Express Pay to grant the designation.</p>
-            <button :disabled="busy" @click="advance('confirm_admin_fee')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Confirm Admin Fee Payment →</button>
+            <ManualPaymentForm label="Confirm Admin Fee Payment →" :busy="busy" @submit="(p) => advance('confirm_admin_fee', p)" />
         </div>
 
         <div v-else-if="stage === 'appeal_payment'">
-            <p class="mb-3 text-sm text-slate-600">The institution has started an appeal (Pending Appeal). Waiting for the appeal fee.</p>
-            <button :disabled="busy" @click="advance('confirm_appeal_fee')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Confirm Appeal Fee Payment →</button>
+            <p class="mb-3 text-sm text-slate-600">The institution has started an appeal (Pending Appeal). Waiting for the appeal fee. Confirm a payment received outside Express Pay to start the appeal review.</p>
+            <ManualPaymentForm label="Confirm Appeal Fee Payment →" :busy="busy" @submit="(p) => advance('confirm_appeal_fee', p)" />
         </div>
 
         <div v-else-if="stage === 'appeal_review'">

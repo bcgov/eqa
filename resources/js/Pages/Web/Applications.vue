@@ -15,7 +15,8 @@ function statusClass(s) {
     if (['Not Approved', 'Declined', 'Expired'].includes(s)) return 'bg-red-100 text-red-700'
     if (['Under Review', 'Suitability Review', 'Pending Appeal'].includes(s)) return 'bg-amber-100 text-amber-700'
     if (s === 'Pending Review' || s === 'Fee Payment Received') return 'bg-blue-100 text-blue-700'
-    if (s === 'Application Fee Required') return 'bg-orange-100 text-orange-700'
+    if (s === 'Application Fee Required' || s === 'Additional Information Required') return 'bg-orange-100 text-orange-700'
+    if (s === 'Pending Admin Confirm Expiry') return 'bg-red-100 text-red-700'
     return 'bg-slate-100 text-slate-500'
 }
 </script>

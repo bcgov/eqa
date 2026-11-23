@@ -52,7 +52,7 @@
             {{ $issuerEmail }}
         </td>
         <td class="doc-title">
-            <h1>{!! $text['title'] !!}</h1>
+            <h1>{!! $receipt ? $text['receipt_title'] : $text['title'] !!}</h1>
             <p>{{ $title }}</p>
         </td>
     </tr>
@@ -63,17 +63,27 @@
 <table class="meta">
     <tr>
         <td>
-            <div class="label">Bill to</div>
+            <div class="label">{{ $receipt ? 'Received from' : 'Bill to' }}</div>
             @foreach ($billTo as $line)
                 {{ $line }}<br>
             @endforeach
         </td>
         <td>
             <table class="facts">
-                <tr><td class="k">Invoice number</td><td class="v">{{ $invoice->invoice_number ?: '—' }}</td></tr>
-                <tr><td class="k">Invoice date</td><td class="v">{{ $date($invoice->invoice_date) }}</td></tr>
-                @if (! empty($invoice->due_date))
-                    <tr><td class="k">Due date</td><td class="v">{{ $date($invoice->due_date) }}</td></tr>
+                @if ($receipt)
+                    <tr><td class="k">Payment date</td><td class="v">{{ $date($invoice->payment_received_date ?? null) }}</td></tr>
+                    <tr><td class="k">Payment method</td><td class="v">{{ ($invoice->payment_method ?? null) ?: '—' }}</td></tr>
+                    @if (! empty($invoice->transaction_reference))
+                        <tr><td class="k">Transaction ref.</td><td class="v">{{ $invoice->transaction_reference }}</td></tr>
+                    @endif
+                    <tr><td class="k">For invoice</td><td class="v">{{ $invoice->invoice_number ?: '—' }}</td></tr>
+                    <tr><td class="k">Invoice date</td><td class="v">{{ $date($invoice->invoice_date) }}</td></tr>
+                @else
+                    <tr><td class="k">Invoice number</td><td class="v">{{ $invoice->invoice_number ?: '—' }}</td></tr>
+                    <tr><td class="k">Invoice date</td><td class="v">{{ $date($invoice->invoice_date) }}</td></tr>
+                    @if (! empty($invoice->due_date))
+                        <tr><td class="k">Due date</td><td class="v">{{ $date($invoice->due_date) }}</td></tr>
+                    @endif
                 @endif
                 @if (! empty($invoice->application_reference))
                     <tr><td class="k">Application</td><td class="v">{{ $invoice->application_reference }}</td></tr>
@@ -114,17 +124,27 @@
     <tr><td>Subtotal</td><td class="num">{{ $money($invoice->invoice_amount ?? $invoice->total_charges) }}</td></tr>
     <tr><td>Taxes</td><td class="num">{{ $money($invoice->taxes) }}</td></tr>
     <tr><td>Total</td><td class="num">{{ $money($invoice->total_charges) }}</td></tr>
-    @if ($paid > 0)
-        <tr><td>Payments received</td><td class="num">−{{ $money($paid) }}</td></tr>
+    @if ($receipt)
+        <tr class="due"><td>Amount paid (CAD)</td><td class="num">{{ $money($paid) }}</td></tr>
+        <tr><td>Balance remaining</td><td class="num">{{ $money($balance) }}</td></tr>
+    @else
+        @if ($paid > 0)
+            <tr><td>Payments received</td><td class="num">−{{ $money($paid) }}</td></tr>
+        @endif
+        <tr class="due"><td>Balance due (CAD)</td><td class="num">{{ $money($balance) }}</td></tr>
     @endif
-    <tr class="due"><td>Balance due (CAD)</td><td class="num">{{ $money($balance) }}</td></tr>
 </table>
 
 @if (empty($invoice->line_items) && ! empty($invoice->description))
     <p class="note">{{ $invoice->description }}</p>
 @endif
 
-@if ($invoice->invoice_status === 'Paid')
+@if ($receipt)
+    <div class="box">
+        <h2>{!! $text['paid_message'] !!}</h2>
+        <p>{!! $text['receipt_message'] !!}</p>
+    </div>
+@elseif ($invoice->invoice_status === 'Paid')
     <div class="box">
         <h2>{!! $text['paid_message'] !!}</h2>
         <p>

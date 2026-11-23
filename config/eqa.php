@@ -40,6 +40,8 @@ return [
         'paid_message' => 'Paid — thank you',
         'notes' => '',
         'footer' => '{program_name} · {contact_email} · Invoice {invoice_number}',
+        'receipt_title' => 'RECEIPT',
+        'receipt_message' => 'Thank you. Your payment for invoice {invoice_number} has been received. Please keep this receipt for your records.',
     ],
 
 ];

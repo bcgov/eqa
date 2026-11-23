@@ -15,7 +15,7 @@ const token = (name) => `{${name}}`
 </script>
 
 <template>
-    <Head title="Maintenance · Invoice" />
+    <Head title="Maintenance · Invoice & Receipt" />
 
     <MaintenanceMenu>
         <div v-if="flash.success" class="mb-4 rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700">{{ flash.success }}</div>
@@ -23,13 +23,18 @@ const token = (name) => `{${name}}`
 
         <div class="mb-6 flex flex-wrap items-start justify-between gap-3">
             <div>
-                <h1 class="text-2xl font-bold text-slate-800">Invoice</h1>
+                <h1 class="text-2xl font-bold text-slate-800">Invoice &amp; Receipt</h1>
                 <p class="mt-1 max-w-2xl text-sm text-slate-500">
-                    Wording printed on the invoices institutions download. The issuer block (ministry, branch, address and email) and the fee amounts are under
+                    Wording printed on the invoices institutions download and on the payment receipts they download and receive by email
+                    (the "Payment — Receipt" template under <a href="/admin/maintenance/email-templates" class="text-indigo-600 hover:underline">Email Templates</a>).
+                    The issuer block (ministry, branch, address and email) and the fee amounts are under
                     <a href="/admin/maintenance/utils" class="text-indigo-600 hover:underline">Utils</a>.
                 </p>
             </div>
-            <a href="/admin/maintenance/invoice/preview" target="_blank" rel="noopener" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Preview sample invoice (PDF)</a>
+            <div class="flex flex-wrap gap-2">
+                <a href="/admin/maintenance/invoice/preview" target="_blank" rel="noopener" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Preview invoice (PDF)</a>
+                <a href="/admin/maintenance/invoice/preview?receipt=1" target="_blank" rel="noopener" class="rounded-md border border-indigo-600 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">Preview receipt (PDF)</a>
+            </div>
         </div>
 
         <UtilSettings :categories="categories" :results="results" :show-category-headings="false">

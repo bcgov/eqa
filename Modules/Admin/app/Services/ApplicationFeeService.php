@@ -6,7 +6,9 @@ namespace Modules\Admin\Services;
 
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * Fee invoices and the payment-driven steps of the EQA workflow (flowchart DRAFT V1.1):
@@ -179,18 +181,29 @@ class ApplicationFeeService
             ->first();
     }
 
-    /** Ministry "Confirm Payment" for a payment made outside Express Pay (cheque, EFT, ...). */
-    public function recordManualPayment(object $invoice, string $method = 'Manual'): void
+    /**
+     * Ministry "Confirm Payment" for a payment made outside Express Pay (cheque, EFT, ...).
+     *
+     * @param  array{date?: ?string, reference?: ?string, notes?: ?string}  $details  as entered by the ministry
+     */
+    public function recordManualPayment(object $invoice, string $method = 'Manual', array $details = []): void
     {
         if (($invoice->invoice_status ?? null) !== 'Paid') {
             $due = (float) ($invoice->invoice_balance ?? $invoice->total_charges ?? 0);
-            DB::table('invoices')->where('crm_id', $invoice->crm_id)->update([
+            $update = [
                 'invoice_balance' => 0,
                 'invoice_status' => 'Paid',
                 'payment_amount' => round((float) ($invoice->payment_amount ?? 0) + $due, 2),
-                'payment_received_date' => $this->today(),
+                'payment_received_date' => ($details['date'] ?? null) ?: $this->today(),
                 'payment_method' => $method,
-            ]);
+            ];
+            if (($details['reference'] ?? null) !== null && $details['reference'] !== '') {
+                $update['transaction_reference'] = $details['reference'];
+            }
+            if (($details['notes'] ?? null) !== null && $details['notes'] !== '') {
+                $update['payment_notes'] = $details['notes'];
+            }
+            DB::table('invoices')->where('crm_id', $invoice->crm_id)->update($update);
         }
 
         $this->invoicePaid($invoice->crm_id);
@@ -209,11 +222,13 @@ class ApplicationFeeService
             return;
         }
 
+        $this->sendReceipt($invoice, $application);
+
         switch ($invoice->fee_type ?? null) {
             case self::FEE_APPLICATION_NEW:
             case self::FEE_APPLICATION_RENEWAL:
                 DB::table('applications')->where('crm_id', $application->crm_id)->update(['fees_payment_received' => true]);
-                if ($application->workflow_stage === 'draft' && ! $this->truthy($application->need_additional_details)) {
+                if ($application->workflow_stage === 'draft') {
                     $this->submit($application);
                 } elseif ($application->workflow_stage === 'fee_required') {
                     $this->feeReceived($application);
@@ -251,12 +266,13 @@ class ApplicationFeeService
 
     /**
      * Draft -> Application Fee Required (or Fee Payment when the fee is already paid);
-     * a reopened draft goes straight back to Under Review. The receipt acknowledgement is
-     * only sent once the fee is paid, and Pending Review only follows the ministry's confirmation.
+     * an application returned for additional information goes straight back to Under Review.
+     * The receipt acknowledgement is only sent once the fee is paid, and Pending Review only
+     * follows the ministry's confirmation.
      */
     public function submit(object $application): void
     {
-        if ($this->truthy($application->need_additional_details)) {
+        if (($application->workflow_stage ?? null) === 'changes_requested') {
             DB::table('applications')->where('crm_id', $application->crm_id)->update([
                 'workflow_stage' => 'under_review',
                 'status' => 'Under Review',
@@ -315,7 +331,13 @@ class ApplicationFeeService
     /** A draft that has never been submitted: no fees are requested until it is. */
     public function awaitingSubmission(object $application): bool
     {
-        return ($application->workflow_stage ?? null) === 'draft' && ! $this->truthy($application->need_additional_details ?? null);
+        return ($application->workflow_stage ?? null) === 'draft';
+    }
+
+    /** The institution may edit and (re)submit a new draft or an application returned for additional information. */
+    public function editableByInstitution(object $application): bool
+    {
+        return ($application->status ?? null) === 'Draft' || ($application->workflow_stage ?? null) === 'changes_requested';
     }
 
     private function createApplicationFeeInvoice(object $application, ?object $institution): object
@@ -333,14 +355,28 @@ class ApplicationFeeService
         return $this->createQuotedInvoice($application, $feeType, $quote);
     }
 
-    /** Ministry reopens an incomplete application so the institution can supply missing information. */
-    public function requestChanges(object $application, string $changes): void
+    public const STATUS_INFO_REQUIRED = 'Additional Information Required';
+
+    public const STATUS_PENDING_EXPIRY = 'Pending Admin Confirm Expiry';
+
+    /** Default "resubmit by" date when the ministry reopens an application for changes (Maintenance > Utils). */
+    public function defaultChangesDueDate(): string
     {
-        $due = Carbon::now('America/Vancouver')->addDays((int) config('eqa.deadlines.changes_days', 30))->toDateString();
+        return Carbon::now('America/Vancouver')->addDays((int) config('eqa.deadlines.changes_days', 30))->toDateString();
+    }
+
+    /**
+     * Ministry returns an incomplete application so the institution can supply missing information
+     * (stage changes_requested, status Additional Information Required).
+     */
+    public function requestChanges(object $application, string $changes, ?string $dueDate = null): void
+    {
+        $due = $dueDate ?: $this->defaultChangesDueDate();
 
         DB::table('applications')->where('crm_id', $application->crm_id)->update([
-            'workflow_stage' => 'draft',
-            'status' => 'Draft',
+            'workflow_stage' => 'changes_requested',
+            'status' => self::STATUS_INFO_REQUIRED,
+            // Legacy CRM "Need Additional Details" field, kept in step for reporting.
             'need_additional_details' => true,
             'changes_requested' => $changes,
             'changes_due_date' => $due,
@@ -349,6 +385,25 @@ class ApplicationFeeService
         $institution = $this->institution($application);
         if ($institution !== null) {
             $this->notifier->changesRequested($institution, $application, $changes, $due);
+        }
+    }
+
+    /**
+     * Ministry moves the resubmission deadline of an application waiting on additional information,
+     * or reopens one that missed it (Pending Admin Confirm Expiry). The institution is told the new date.
+     */
+    public function extendChangesDeadline(object $application, string $dueDate): void
+    {
+        DB::table('applications')->where('crm_id', $application->crm_id)->update([
+            'workflow_stage' => 'changes_requested',
+            'status' => self::STATUS_INFO_REQUIRED,
+            'need_additional_details' => true,
+            'changes_due_date' => $dueDate,
+        ]);
+
+        $institution = $this->institution($application);
+        if ($institution !== null) {
+            $this->notifier->changesRequested($institution, $application, (string) ($application->changes_requested ?? ''), $dueDate);
         }
     }
 
@@ -432,8 +487,8 @@ class ApplicationFeeService
     }
 
     /**
-     * Expire applications whose deadline passed: unpaid admin fee, unanswered change request,
-     * unpaid appeal fee (the original decline stands).
+     * Expire applications whose deadline passed: unpaid admin fee, unpaid appeal fee (the original
+     * decline stands). An unanswered change request becomes Pending Admin Confirm Expiry instead.
      *
      * @return array{admin_fee: int, changes: int, appeal: int}
      */
@@ -463,11 +518,12 @@ class ApplicationFeeService
             }
         }
 
+        // Missed resubmission deadline (each application's own changes_due_date): the ministry
+        // confirms the expiry or extends the deadline, so it is not expired automatically.
         $counts['changes'] = DB::table('applications')
-            ->where('workflow_stage', 'draft')
-            ->where('need_additional_details', true)
+            ->where('workflow_stage', 'changes_requested')
             ->where('changes_due_date', '<', $today)
-            ->update(['workflow_stage' => 'end', 'status' => 'Expired']);
+            ->update(['workflow_stage' => 'pending_expiry', 'status' => self::STATUS_PENDING_EXPIRY]);
 
         return $counts;
     }
@@ -487,6 +543,21 @@ class ApplicationFeeService
             $this->notifier->applicationDecision(true, $institution, (string) $application->reference, $approvedDate, [
                 'designation_expiry' => (string) ($application->designation_expiry ?? ''),
             ]);
+        }
+    }
+
+    /** Email the institution its payment receipt. Never lets a mail/PDF problem undo the payment. */
+    private function sendReceipt(object $invoice, object $application): void
+    {
+        $institution = $this->institution($application);
+        if ($institution === null) {
+            return;
+        }
+
+        try {
+            $this->notifier->paymentReceipt($institution, $invoice, $application);
+        } catch (Throwable $e) {
+            Log::warning('Payment receipt email failed for invoice '.($invoice->invoice_number ?? $invoice->crm_id).': '.$e->getMessage());
         }
     }
 

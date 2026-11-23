@@ -17,8 +17,8 @@ class Application extends Model
 {
     /** Workflow stages that mean the application is still open (not finalized). */
     public const ACTIVE_STAGES = [
-        'draft', 'fee_required', 'fees_payment', 'pending_review', 'under_review', 'suitability_review', 'application_approval',
-        'not_approved', 'non_approval_reasons', 'admin_fee', 'appeal_payment', 'appeal_review',
+        'draft', 'fee_required', 'fees_payment', 'pending_review', 'under_review', 'changes_requested', 'suitability_review', 'application_approval',
+        'not_approved', 'non_approval_reasons', 'admin_fee', 'appeal_payment', 'appeal_review', 'pending_expiry',
     ];
 
     protected $table = 'applications';

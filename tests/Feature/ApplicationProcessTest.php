@@ -8,8 +8,10 @@ use App\Models\Role;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
+use Illuminate\Mail\Events\MessageSent;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
@@ -138,17 +140,50 @@ class ApplicationProcessTest extends TestCase
     {
         $id = $this->submittedApplication();
 
-        $this->advance($id, 'record_payment', ['payment_method' => 'EFT'])->assertSessionHas('success');
+        $tomorrow = Carbon::now('America/Vancouver')->addDay()->toDateString();
+        $this->advance($id, 'record_payment', ['payment_method' => 'EFT', 'payment_date' => $tomorrow])->assertSessionHasErrors('payment_date');
+        $this->assertSame('fee_required', $this->application($id)->workflow_stage);
+
+        $this->advance($id, 'record_payment', [
+            'payment_method' => 'EFT',
+            'payment_date' => '2026-11-02',
+            'payment_reference' => ' EFT-778899 ',
+            'payment_notes' => 'Received from RBC, payer Process College Ltd.',
+        ])->assertSessionHas('success');
 
         $fee = $this->invoice($id, ApplicationFeeService::FEE_APPLICATION_NEW);
         $this->assertSame('Paid', $fee->invoice_status);
         $this->assertSame('EFT', $fee->payment_method);
+        $this->assertSame('2026-11-02', $fee->payment_received_date);
+        $this->assertSame('EFT-778899', $fee->transaction_reference);
+        $this->assertSame('Received from RBC, payer Process College Ltd.', $fee->payment_notes);
         $application = $this->application($id);
         $this->assertSame('fees_payment', $application->workflow_stage);
         $this->assertSame('Fee Payment Received', $application->status);
         $this->assertSame(0, DB::table('payment_transactions')->count());
 
         $this->advance($id, 'record_payment', ['payment_method' => 'Bitcoin'])->assertSessionHas('error');
+    }
+
+    public function test_paid_fee_emails_the_institution_its_receipt_once_with_the_pdf_attached(): void
+    {
+        $attachments = [];
+        Event::listen(MessageSent::class, function (MessageSent $event) use (&$attachments): void {
+            foreach ($event->message->getAttachments() as $part) {
+                $attachments[] = [(string) $event->message->getSubject(), $part->getFilename(), $part->getMediaType().'/'.$part->getMediaSubtype()];
+            }
+        });
+        $id = $this->submittedApplication();
+
+        $this->advance($id, 'record_payment', ['payment_method' => 'EFT'])->assertSessionHas('success');
+        $fee = $this->invoice($id, ApplicationFeeService::FEE_APPLICATION_NEW);
+        $this->assertEmailed('payment_receipt', $fee->invoice_number);
+
+        $this->assertSame([['EQA Payment Received | Invoice '.$fee->invoice_number, 'EQA_Receipt_'.$fee->invoice_number.'.pdf', 'application/pdf']], $attachments);
+
+        // Confirming an already-paid invoice again does not resend the receipt.
+        app(ApplicationFeeService::class)->recordManualPayment($fee, 'EFT');
+        $this->assertSame(1, DB::table('sent_emails')->where('template_key', 'payment_receipt')->count());
     }
 
     public function test_receipt_is_acknowledged_once_when_the_fee_is_recorded_and_not_confirmable_before(): void
@@ -520,7 +555,8 @@ class ApplicationProcessTest extends TestCase
         $this->advance($id, 'request_changes', ['changes' => 'Upload the current policy manual.'])->assertSessionHas('success');
 
         $application = $this->application($id);
-        $this->assertSame('Draft', $application->status);
+        $this->assertSame('Additional Information Required', $application->status);
+        $this->assertSame('changes_requested', $application->workflow_stage);
         $this->assertEquals(1, $application->need_additional_details);
         $this->assertSame($this->vancouverDate(30), $application->changes_due_date);
         $this->assertEmailed('application_changes_requested', 'Upload the current policy manual.');
@@ -550,7 +586,7 @@ class ApplicationProcessTest extends TestCase
         $this->assertNull(DB::table('applications')->whereNotIn('crm_id', [$draft, $review])->value('sabc_designation'));
     }
 
-    public function test_changes_not_provided_by_the_deadline_expire_the_application(): void
+    public function test_missed_resubmission_deadline_waits_for_the_ministry_to_confirm_the_expiry(): void
     {
         $id = $this->applicationAt('under_review');
         $this->advance($id, 'request_changes', ['changes' => 'Missing info.']);
@@ -558,8 +594,106 @@ class ApplicationProcessTest extends TestCase
         $this->travel(31)->days();
         $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
 
+        $application = $this->application($id);
+        $this->assertSame('Pending Admin Confirm Expiry', $application->status);
+        $this->assertSame('pending_expiry', $application->workflow_stage);
+        $this->asInstitution()->post("/web/applications/{$id}/submit")->assertForbidden();
+        $this->asInstitution()->post('/web/applications', $this->applicationForm())->assertSessionHas('error');
+
+        $this->advance($id, 'confirm_expiry')->assertSessionHas('success');
+
         $this->assertSame('Expired', $this->application($id)->status);
         $this->assertSame('end', $this->application($id)->workflow_stage);
+    }
+
+    public function test_resubmission_deadline_can_be_set_per_application_and_the_job_uses_it(): void
+    {
+        $id = $this->applicationAt('under_review');
+
+        $this->advance($id, 'request_changes', ['changes' => 'Missing info.', 'changes_due_date' => $this->vancouverDate(0)])->assertSessionHasErrors('changes_due_date');
+        $this->advance($id, 'request_changes', ['changes' => 'Missing info.', 'changes_due_date' => $this->vancouverDate(400)])->assertSessionHasErrors('changes_due_date');
+        $this->assertSame('under_review', $this->application($id)->workflow_stage);
+
+        $this->advance($id, 'request_changes', ['changes' => 'Missing info.', 'changes_due_date' => $this->vancouverDate(60)])->assertSessionHas('success');
+        $this->assertSame($this->vancouverDate(60), $this->application($id)->changes_due_date);
+        $this->assertEmailed('application_changes_requested', $this->vancouverDate(60));
+
+        // Past the 30-day default but within this application's own deadline: not flagged.
+        $this->travel(45)->days();
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
+        $this->assertSame('changes_requested', $this->application($id)->workflow_stage);
+
+        $this->travel(16)->days();
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
+        $this->assertSame('pending_expiry', $this->application($id)->workflow_stage);
+    }
+
+    public function test_ministry_can_change_the_deadline_while_waiting_or_extend_a_missed_one(): void
+    {
+        $id = $this->applicationAt('under_review');
+        $this->advance($id, 'request_changes', ['changes' => 'Missing info.']);
+
+        $this->advance($id, 'extend_changes', ['changes_due_date' => $this->vancouverDate(45)])->assertSessionHas('success');
+        $this->assertSame($this->vancouverDate(45), $this->application($id)->changes_due_date);
+        $this->assertSame('changes_requested', $this->application($id)->workflow_stage);
+
+        $this->travel(46)->days();
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
+        $this->assertSame('pending_expiry', $this->application($id)->workflow_stage);
+
+        $this->advance($id, 'extend_changes', ['changes_due_date' => $this->vancouverDate(14)])->assertSessionHas('success');
+        $application = $this->application($id);
+        $this->assertSame('Additional Information Required', $application->status);
+        $this->assertSame('changes_requested', $application->workflow_stage);
+        $this->assertSame($this->vancouverDate(14), $application->changes_due_date);
+        $this->assertSame('Missing info.', $application->changes_requested);
+        $this->assertEmailed('application_changes_requested', $this->vancouverDate(14));
+
+        $this->asInstitution()->put("/web/applications/{$id}", $this->applicationForm())->assertRedirect();
+        $this->asInstitution()->post("/web/applications/{$id}/submit")->assertSessionHas('success');
+        $this->assertSame('under_review', $this->application($id)->workflow_stage);
+    }
+
+    public function test_a_normal_draft_deadline_cannot_be_set_by_the_ministry(): void
+    {
+        $id = $this->startApplication();
+
+        $this->advance($id, 'extend_changes', ['changes_due_date' => $this->vancouverDate(10)])->assertSessionHas('error');
+
+        $this->assertNull($this->application($id)->changes_due_date);
+    }
+
+    public function test_institution_sees_and_resubmits_an_application_returned_for_additional_information(): void
+    {
+        $id = $this->applicationAt('under_review');
+        $this->advance($id, 'request_changes', ['changes' => 'Upload the current policy manual.']);
+
+        $this->viewApplication($id)
+            ->assertJsonPath('props.application.status', 'Additional Information Required')
+            ->assertJsonPath('props.canEdit', true)
+            ->assertJsonPath('props.awaitingSubmission', false);
+        $this->asInstitution()->get("/web/applications/{$id}/edit")->assertOk();
+
+        $this->asInstitution()->post("/web/applications/{$id}/submit")->assertSessionHas('success');
+
+        $application = $this->application($id);
+        $this->assertSame('under_review', $application->workflow_stage);
+        $this->assertEquals(0, $application->need_additional_details);
+        $this->assertSame(0, DB::table('invoices')->count(), 'Resubmitting additional information is not charged a fee.');
+        $this->asInstitution()->get("/web/applications/{$id}/edit")->assertForbidden();
+    }
+
+    public function test_applications_already_returned_as_drafts_move_to_the_new_stage(): void
+    {
+        $returned = $this->applicationAt('draft', ['status' => 'Draft', 'need_additional_details' => true]);
+        $neverSubmitted = $this->applicationAt('draft', ['status' => 'Draft', 'need_additional_details' => false]);
+
+        (require database_path('migrations/2026_11_23_000006_add_changes_requested_stage.php'))->up();
+
+        $this->assertSame('changes_requested', $this->application($returned)->workflow_stage);
+        $this->assertSame('Additional Information Required', $this->application($returned)->status);
+        $this->assertSame('draft', $this->application($neverSubmitted)->workflow_stage);
+        $this->assertSame('Draft', $this->application($neverSubmitted)->status);
     }
 
     // Helpers ---------------------------------------------------------------------------

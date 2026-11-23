@@ -107,6 +107,8 @@ class MaintenanceUtilsTest extends TestCase
 
         $preview = $admin->get('/admin/maintenance/invoice/preview')->assertOk()->assertHeader('Content-Type', 'application/pdf');
         $this->assertStringStartsWith('%PDF-', $preview->getContent());
+        $receipt = $admin->get('/admin/maintenance/invoice/preview?receipt=1')->assertOk();
+        $this->assertStringContainsString('EQA_Receipt_Preview.pdf', (string) $receipt->headers->get('Content-Disposition'));
 
         $this->as(Role::MINISTRY_USER)->get('/admin/maintenance/invoice')->assertForbidden();
     }

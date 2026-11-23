@@ -15,7 +15,7 @@ const props = defineProps({
 const flash = computed(() => usePage().props.flash || {})
 const busy = ref(false)
 const feeLabels = { application_new: 'New Application Fee', application_renewal: 'Renewal Application Fee', admin_variable: 'Administrative Fee', appeal: 'Appeal Fee' }
-const reopened = computed(() => props.canEdit && (props.application.need_additional_details === true || props.application.need_additional_details === 1))
+const reopened = computed(() => props.application.workflow_stage === 'changes_requested')
 const unpaidFee = computed(() => props.invoices.some((i) => i.payable))
 
 function post(url) {
@@ -89,6 +89,12 @@ const affirmations = computed(() => [
         <div v-if="flash.success" class="mt-4 rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700">{{ flash.success }}</div>
         <div v-if="flash.error" class="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{{ flash.error }}</div>
 
+        <!-- Missed resubmission deadline, waiting for EQA staff to confirm the expiry or extend it -->
+        <div v-if="application.workflow_stage === 'pending_expiry'" class="mt-6 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            <p class="font-semibold">The deadline to resubmit this application ({{ dash(application.changes_due_date) }}) has passed.</p>
+            <p class="mt-1">EQA staff will review it and either close the application or give you more time. Contact EQA@gov.bc.ca if you need an extension.</p>
+        </div>
+
         <!-- Next steps: fees, changes requested, appeal -->
         <section v-if="invoices.length || canEdit || canAppeal || application.compliance_order" class="mt-6 rounded-lg border-2 border-indigo-100 bg-indigo-50/40 p-5">
             <h2 class="mb-3 text-base font-semibold text-indigo-900">Status: {{ dash(application.status) }}</h2>
@@ -118,6 +124,7 @@ const affirmations = computed(() => [
                         <td class="py-2 text-right">
                             <button v-if="i.payable && canPayOnline" type="button" :disabled="busy" @click="pay(i)" class="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">Pay Online</button>
                             <span v-else-if="i.payment_under_review" class="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" title="Do not pay again. EQA staff will confirm this payment.">Payment being confirmed</span>
+                            <a v-else-if="i.invoice_status === 'Paid'" :href="`/web/invoices/${i.crm_id}/receipt`" class="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100">Download Receipt</a>
                         </td>
                     </tr>
                 </tbody>

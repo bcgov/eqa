@@ -39,12 +39,14 @@ class MaintenanceController extends Controller
         ) + ['placeholders' => InvoicePdf::PLACEHOLDERS]);
     }
 
-    /** Sample invoice with the current wording, opened in the browser. */
-    public function previewInvoice(InvoicePdf $pdf): HttpResponse
+    /** Sample invoice (or with ?receipt=1 its payment receipt) with the current wording, opened in the browser. */
+    public function previewInvoice(Request $request, InvoicePdf $pdf): HttpResponse
     {
-        return response($pdf->render($pdf->sample()), 200, [
+        $receipt = $request->boolean('receipt');
+
+        return response($pdf->render($receipt ? $pdf->sampleReceipt() : $pdf->sample(), $receipt), 200, [
             'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'inline; filename="EQA_Invoice_Preview.pdf"',
+            'Content-Disposition' => 'inline; filename="'.($receipt ? 'EQA_Receipt_Preview.pdf' : 'EQA_Invoice_Preview.pdf').'"',
         ]);
     }
 

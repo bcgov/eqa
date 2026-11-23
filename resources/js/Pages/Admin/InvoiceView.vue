@@ -114,6 +114,7 @@ function statusClass(s) {
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Payment Date</dt><dd class="text-slate-800">{{ invoice.payment_received_date || '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Authorization Code</dt><dd class="text-slate-800">{{ invoice.transaction_authorization || '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Payment Method</dt><dd class="text-slate-800">{{ invoice.payment_method || '—' }}</dd></div>
+                <div v-if="invoice.payment_notes" class="py-2"><dt class="text-slate-500">Payment Notes</dt><dd class="mt-1 whitespace-pre-line text-slate-800">{{ invoice.payment_notes }}</dd></div>
             </dl>
         </div>
 

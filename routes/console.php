@@ -21,7 +21,8 @@ Schedule::command('eqa:reconcile-payments')
     ->everyFifteenMinutes()
     ->withoutOverlapping();
 
-// Expire applications past their admin fee / change request / appeal fee deadline.
+// Expire applications past their admin fee / appeal fee deadline; flag missed change-request
+// deadlines as Pending Admin Confirm Expiry for the ministry to confirm or extend.
 Schedule::command('eqa:enforce-deadlines')
     ->dailyAt('01:00')
     ->timezone('America/Vancouver')

@@ -18,16 +18,20 @@ use Modules\Admin\Services\ProcessNotifier;
 /**
  * Drives the EQA application approval Business Process Flow (migrated from the
  * Dynamics BPF): Draft -> Application Fee Required -> Fee Payment -> Pending Review ->
- * Under Review -> [Eligibility] -> Application Approval | Not Approved -> Non-Approval
- * Reasons | Suitability Review -> End. Each action advances the stage and records the
- * matching decision fields on the application in postgres-dest.
+ * Under Review [-> Additional Information Required -> Under Review] -> [Eligibility] ->
+ * Application Approval | Not Approved -> Non-Approval Reasons | Suitability Review -> End.
+ * Each action advances the stage and records the matching decision fields on the
+ * application in postgres-dest.
  */
 class ApplicationWorkflowController extends Controller
 {
     /** Ways the ministry can record an application fee paid outside Express Pay. */
     private const MANUAL_PAYMENT_METHODS = ['EFT', 'Cheque', 'Other'];
 
-    /** stage => [action => next stage]. Drafts have none: only the institution can submit. */
+    /**
+     * stage => [action => next stage]. Drafts have none: only the institution can submit (or resubmit
+     * an application returned for additional information).
+     */
     private const TRANSITIONS = [
         'fee_required' => ['record_payment' => 'fees_payment'],
         'fees_payment' => ['confirm_payment' => 'pending_review'],
@@ -36,8 +40,9 @@ class ApplicationWorkflowController extends Controller
             'eligible' => 'application_approval',
             'ineligible' => 'not_approved',
             'refer_suitability' => 'suitability_review',
-            'request_changes' => 'draft',
+            'request_changes' => 'changes_requested',
         ],
+        'changes_requested' => ['extend_changes' => 'changes_requested'],
         'application_approval' => ['approve' => 'admin_fee'],
         'not_approved' => ['record_reasons' => 'non_approval_reasons'],
         'non_approval_reasons' => ['finalize' => 'end'],
@@ -45,6 +50,7 @@ class ApplicationWorkflowController extends Controller
         'admin_fee' => ['confirm_admin_fee' => 'end'],
         'appeal_payment' => ['confirm_appeal_fee' => 'appeal_review'],
         'appeal_review' => ['appeal_overturn' => 'application_approval', 'appeal_uphold' => 'end'],
+        'pending_expiry' => ['confirm_expiry' => 'end', 'extend_changes' => 'changes_requested'],
     ];
 
     /**
@@ -151,10 +157,18 @@ class ApplicationWorkflowController extends Controller
 
         switch ($action) {
             case 'request_changes':
-                $data = $request->validate(['changes' => ['required', 'string', 'max:2000']]);
-                $fees->requestChanges($application, $data['changes']);
+                $data = $request->validate(
+                    ['changes' => ['required', 'string', 'max:2000'], 'changes_due_date' => $this->changesDueDateRules(false)],
+                    $this->changesDueDateMessages(),
+                );
+                $fees->requestChanges($application, $data['changes'], $data['changes_due_date'] ?? null);
 
-                return back()->with('success', 'Application reopened for changes; the institution has been notified.');
+                return back()->with('success', 'Additional information requested; the institution has been notified.');
+            case 'extend_changes':
+                $data = $request->validate(['changes_due_date' => $this->changesDueDateRules(true)], $this->changesDueDateMessages());
+                $fees->extendChangesDeadline($application, $data['changes_due_date']);
+
+                return back()->with('success', 'Resubmission deadline set to '.$data['changes_due_date'].'; the institution has been notified.');
             case 'approve':
             case 'pass':
                 $data = $request->validate([
@@ -176,7 +190,8 @@ class ApplicationWorkflowController extends Controller
                 if ($invoice === null) {
                     return back()->with('error', 'No invoice found for this fee.');
                 }
-                $fees->recordManualPayment($invoice, $request->string('payment_method')->toString() ?: 'Manual');
+                [$method, $details] = $this->manualPayment($request);
+                $fees->recordManualPayment($invoice, $method, $details);
 
                 return back()->with('success', 'Payment confirmed. '.$advanced);
             case 'appeal_overturn':
@@ -194,9 +209,7 @@ class ApplicationWorkflowController extends Controller
 
         switch ($action) {
             case 'record_payment':
-                $method = $request->validate([
-                    'payment_method' => ['nullable', 'in:'.implode(',', self::MANUAL_PAYMENT_METHODS)],
-                ])['payment_method'] ?? 'Other';
+                [$method, $details] = $this->manualPayment($request);
                 $feeInvoice = $fees->invoiceFor($crmId, ApplicationFeeService::APPLICATION_FEES);
                 if ($feeInvoice === null) {
                     // Applications submitted before the online fee existed: legacy CRM financial summary.
@@ -204,7 +217,7 @@ class ApplicationWorkflowController extends Controller
                     $feeInvoice = DB::table('invoices')->where('application_crm_id', $crmId)->orderByDesc('invoice_number')->first();
                 }
                 if ($feeInvoice !== null) {
-                    $fees->recordManualPayment($feeInvoice, $method);
+                    $fees->recordManualPayment($feeInvoice, $method, $details);
                 }
                 $updates['status'] = ApplicationFeeService::STATUS_FEE_RECEIVED;
                 $updates['fees_payment_received'] = true;
@@ -235,6 +248,10 @@ class ApplicationWorkflowController extends Controller
                 break;
             case 'record_reasons':
                 $updates['non_approval_reasons'] = (string) $request->string('reasons');
+                break;
+            case 'confirm_expiry':
+                // Missed resubmission deadline confirmed by the ministry.
+                $updates['status'] = 'Expired';
                 break;
             case 'finalize':
             case 'fail':
@@ -296,9 +313,55 @@ class ApplicationWorkflowController extends Controller
         ]);
     }
 
+    /** @return array<int, string> */
+    private function changesDueDateRules(bool $required): array
+    {
+        $today = Carbon::now('America/Vancouver');
+
+        return [
+            $required ? 'required' : 'nullable',
+            'date_format:Y-m-d',
+            'after:'.$today->toDateString(),
+            'before_or_equal:'.$today->copy()->addYear()->toDateString(),
+        ];
+    }
+
+    /** @return array<string, string> */
+    private function changesDueDateMessages(): array
+    {
+        return [
+            'changes_due_date.required' => 'Choose the date the institution must resubmit by.',
+            'changes_due_date.after' => 'The resubmission deadline must be after today.',
+            'changes_due_date.before_or_equal' => 'The resubmission deadline must be within one year.',
+        ];
+    }
+
     private function truthy($value): bool
     {
         return $value === true || $value === 't' || $value === 1 || $value === '1';
+    }
+
+    /**
+     * Details the ministry enters when recording a payment received outside Express Pay.
+     *
+     * @return array{0: string, 1: array{date: ?string, reference: ?string, notes: ?string}}
+     */
+    private function manualPayment(Request $request): array
+    {
+        $data = $request->validate([
+            'payment_method' => ['nullable', 'in:'.implode(',', self::MANUAL_PAYMENT_METHODS)],
+            'payment_date' => ['nullable', 'date_format:Y-m-d', 'before_or_equal:'.Carbon::now('America/Vancouver')->toDateString()],
+            'payment_reference' => ['nullable', 'string', 'max:100'],
+            'payment_notes' => ['nullable', 'string', 'max:1000'],
+        ], [
+            'payment_date.before_or_equal' => 'The payment date cannot be in the future.',
+        ]);
+
+        return [($data['payment_method'] ?? null) ?: 'Other', [
+            'date' => $data['payment_date'] ?? null,
+            'reference' => isset($data['payment_reference']) ? trim($data['payment_reference']) : null,
+            'notes' => isset($data['payment_notes']) ? trim($data['payment_notes']) : null,
+        ]];
     }
 
     /**

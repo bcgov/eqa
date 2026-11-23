@@ -191,7 +191,7 @@ class WebPortalController extends Controller
             'application' => $application,
             'invoices' => $invoices,
             'canPayOnline' => $expressPay->canUserPay($request->user(), $request->session()->has('impersonator_id')),
-            'canEdit' => $application->status === 'Draft',
+            'canEdit' => $fees->editableByInstitution($application),
             'canAppeal' => $fees->canAppeal($application),
             'awaitingSubmission' => $fees->awaitingSubmission($application),
         ]);
@@ -622,7 +622,7 @@ class WebPortalController extends Controller
     public function edit(Request $request, string $crmId): Response
     {
         $application = $this->ownApplication($request, $crmId);
-        abort_unless($application->status === 'Draft', 403);
+        abort_unless(app(ApplicationFeeService::class)->editableByInstitution($application), 403);
 
         return Inertia::render('Web/NewApplication', [
             'institution' => $this->institution($request),
@@ -633,18 +633,18 @@ class WebPortalController extends Controller
     public function update(Request $request, string $crmId): RedirectResponse
     {
         $application = $this->ownApplication($request, $crmId);
-        abort_unless($application->status === 'Draft', 403);
+        abort_unless(app(ApplicationFeeService::class)->editableByInstitution($application), 403);
 
         DB::table('applications')->where('crm_id', $crmId)->update($this->validatedApplication($request));
 
         return redirect('/web/applications/'.$crmId)->with('success', 'Application '.$application->reference.' updated.');
     }
 
-    /** Submit a draft (the application fee is then invoiced), or resubmit requested changes. */
+    /** Submit a draft (the application fee is then invoiced), or resubmit requested additional information. */
     public function submit(Request $request, string $crmId): RedirectResponse
     {
         $application = $this->ownApplication($request, $crmId);
-        abort_unless($application->workflow_stage === 'draft', 403);
+        abort_unless(in_array($application->workflow_stage, ['draft', 'changes_requested'], true), 403);
 
         $fees = app(ApplicationFeeService::class);
         $firstSubmission = $fees->awaitingSubmission($application);
