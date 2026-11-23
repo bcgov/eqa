@@ -94,16 +94,17 @@ class RedBoxWorkflowTest extends TestCase
         $this->assertSame(0, DB::table('invoices')->count(), 'No fee is requested before the application is submitted.');
 
         $this->asInstitution()->post("/web/applications/{$application->crm_id}/submit")->assertSessionHas('success');
+        $this->assertSame('Application Fee Required', $this->application($application->crm_id)->status, 'An unpaid application is not pending review.');
         $invoice = $this->invoice($application->crm_id, ApplicationFeeService::FEE_APPLICATION_NEW);
         $this->assertEquals(config('eqa.fees.application_new'), $invoice->total_charges);
         $this->assertSame('New Application Fee (fixed): $'.number_format(config('eqa.fees.application_new'), 2), $invoice->description);
-        $this->assertNotified('application_submission');
 
         $this->payOnline($invoice);
+        $this->assertNotified('application_submission');
 
         $application = $this->application($application->crm_id);
-        $this->assertSame('Pending Review', $application->status);
-        $this->assertSame('pending_review', $application->workflow_stage);
+        $this->assertSame('Fee Payment Received', $application->status);
+        $this->assertSame('fees_payment', $application->workflow_stage);
         $this->assertEquals(1, $application->fees_payment_received);
         $this->assertSame('Paid', $this->invoice($application->crm_id, ApplicationFeeService::FEE_APPLICATION_NEW)->invoice_status);
     }
@@ -152,7 +153,7 @@ class RedBoxWorkflowTest extends TestCase
 
         $this->payOnline($invoice);
 
-        $this->assertSame('Pending Review', $this->application($application->crm_id)->status);
+        $this->assertSame('Fee Payment Received', $this->application($application->crm_id)->status);
         $this->assertNotified('reapplication_submission');
     }
 
@@ -164,7 +165,6 @@ class RedBoxWorkflowTest extends TestCase
         $id = DB::table('applications')->value('crm_id');
         // Submit first, then pay by cheque.
         $this->asInstitution()->post("/web/applications/{$id}/submit")->assertRedirect();
-        DB::table('applications')->where('crm_id', $id)->update(['receipt_confirmation' => true]);
 
         $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'record_payment', 'payment_method' => 'Cheque'])
             ->assertSessionHas('success');

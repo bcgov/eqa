@@ -97,6 +97,8 @@ class InstitutionController extends Controller
             'institution_number' => $this->nextInstitutionNumber(),
             // Placeholder until the real BCeID business is linked via "Fetch BCeID data".
             'bceid_business_guid' => $this->uniqueBusinessGuid(),
+            // Set explicitly so no database column default can mark a new institution as designated or de-designated.
+            'eqa_status' => 'Pending',
         ]));
 
         return redirect("/admin/institutions/{$crmId}")->with('success', 'Institution created.');

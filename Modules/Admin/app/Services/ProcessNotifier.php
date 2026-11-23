@@ -166,6 +166,9 @@ class ProcessNotifier
      * A given institution is "reapplying" if it has previously been designated
      * (has a designation start / designated status) or already has an approved
      * application on file; otherwise the submission is a first-time application.
+     * A De-Designated status alone is not enough: it only counts when the record
+     * shows a past designation (expiry or de-designation date), so an institution
+     * that was never designated is charged the new application fee.
      */
     public function isReapplication(object $institution): bool
     {
@@ -173,7 +176,12 @@ class ProcessNotifier
             return true;
         }
 
-        if (stripos((string) ($institution->eqa_status ?? ''), 'designat') !== false) {
+        $status = trim((string) ($institution->eqa_status ?? ''));
+        if (strcasecmp($status, 'Designated') === 0) {
+            return true;
+        }
+        if (strcasecmp($status, 'De-Designated') === 0
+            && (! empty($institution->de_designated_date ?? null) || ! empty($institution->designation_expiry))) {
             return true;
         }
 

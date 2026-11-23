@@ -205,10 +205,10 @@ const affirmations = computed(() => [
             <p class="text-sm font-semibold text-slate-700">{{ dash(institution && institution.qa_met_through) }}</p>
         </section>
 
-        <!-- SABC Designation -->
-        <section class="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <!-- SABC Designation: retired question, shown only for older applications that answered Yes -->
+        <section v-if="[true, 1, '1', 't'].includes(application.sabc_designation)" class="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <h2 class="mb-3 border-b border-slate-100 pb-2 text-base font-semibold text-slate-700">Institution has SABC Designation?</h2>
-            <p class="text-sm font-semibold text-slate-700">{{ yesNo(application.sabc_designation) }}</p>
+            <p class="text-sm font-semibold text-slate-700">Yes</p>
         </section>
 
         <!-- EQA Brand Usage Plan -->

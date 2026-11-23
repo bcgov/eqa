@@ -17,7 +17,7 @@ class Application extends Model
 {
     /** Workflow stages that mean the application is still open (not finalized). */
     public const ACTIVE_STAGES = [
-        'draft', 'pending_review', 'fees_payment', 'under_review', 'suitability_review', 'application_approval',
+        'draft', 'fee_required', 'fees_payment', 'pending_review', 'under_review', 'suitability_review', 'application_approval',
         'not_approved', 'non_approval_reasons', 'admin_fee', 'appeal_payment', 'appeal_review',
     ];
 

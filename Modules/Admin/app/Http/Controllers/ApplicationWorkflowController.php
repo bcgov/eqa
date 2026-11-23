@@ -17,17 +17,21 @@ use Modules\Admin\Services\ProcessNotifier;
 
 /**
  * Drives the EQA application approval Business Process Flow (migrated from the
- * Dynamics BPF): Draft -> Pending Review -> Fees Payment -> Under Review ->
- * [Eligibility] -> Application Approval | Not Approved -> Non-Approval Reasons |
- * Suitability Review -> End. Each action advances the stage and records the
+ * Dynamics BPF): Draft -> Application Fee Required -> Fee Payment -> Pending Review ->
+ * Under Review -> [Eligibility] -> Application Approval | Not Approved -> Non-Approval
+ * Reasons | Suitability Review -> End. Each action advances the stage and records the
  * matching decision fields on the application in postgres-dest.
  */
 class ApplicationWorkflowController extends Controller
 {
+    /** Ways the ministry can record an application fee paid outside Express Pay. */
+    private const MANUAL_PAYMENT_METHODS = ['EFT', 'Cheque', 'Other'];
+
     /** stage => [action => next stage]. Drafts have none: only the institution can submit. */
     private const TRANSITIONS = [
-        'pending_review' => ['record_payment' => 'fees_payment'],
-        'fees_payment' => ['begin_review' => 'under_review'],
+        'fee_required' => ['record_payment' => 'fees_payment'],
+        'fees_payment' => ['confirm_payment' => 'pending_review'],
+        'pending_review' => ['begin_review' => 'under_review'],
         'under_review' => [
             'eligible' => 'application_approval',
             'ineligible' => 'not_approved',
@@ -48,9 +52,9 @@ class ApplicationWorkflowController extends Controller
      * (processstage.clientdata IsRequired flags). stage => [field => label].
      */
     private const REQUIRED = [
-        'pending_review' => ['receipt_confirmation' => 'Receipt Confirmation?'],
-        'fees_payment' => [
-            'fees_payment_received' => 'Fees Payment Received?',
+        'fees_payment' => ['fees_payment_received' => 'Fees Payment Received?'],
+        'pending_review' => [
+            'receipt_confirmation' => 'Receipt Confirmation?',
             'ready_for_review' => 'Ready to Review?',
         ],
     ];
@@ -65,7 +69,7 @@ class ApplicationWorkflowController extends Controller
             'receipt_confirmation' => ['boolean'],
             'fees_payment_received' => ['boolean'],
             'ready_for_review' => ['boolean'],
-            'sabc_designation' => ['boolean'],
+            // sabc_designation is retired and read-only; older applications keep their stored value.
             'eligibility' => ['nullable', 'string', 'max:100'],
             'review_completion_date' => ['nullable', 'date'],
             'eqa_good_standing' => ['boolean'],
@@ -107,6 +111,12 @@ class ApplicationWorkflowController extends Controller
             'affirm_authorized' => ['boolean'],
             'representative_signature' => ['nullable', 'string', 'max:255'],
         ]);
+
+        // An application isn't complete until its fee is paid, so receipt can't be confirmed before then.
+        if (($data['receipt_confirmation'] ?? false) && in_array($application->workflow_stage ?: 'draft', ['draft', 'fee_required'], true)) {
+            return back()->withErrors(['receipt_confirmation' => 'Receipt can only be confirmed after the application fee is paid.'])
+                ->with('error', 'Receipt can only be confirmed after the application fee is paid.');
+        }
 
         DB::table('applications')->where('crm_id', $crmId)->update($data);
 
@@ -184,14 +194,23 @@ class ApplicationWorkflowController extends Controller
 
         switch ($action) {
             case 'record_payment':
+                $method = $request->validate([
+                    'payment_method' => ['nullable', 'in:'.implode(',', self::MANUAL_PAYMENT_METHODS)],
+                ])['payment_method'] ?? 'Other';
                 $feeInvoice = $fees->invoiceFor($crmId, ApplicationFeeService::APPLICATION_FEES);
                 if ($feeInvoice === null) {
                     // Applications submitted before the online fee existed: legacy CRM financial summary.
                     $this->ensureInvoice($application);
-                } else {
-                    $fees->recordManualPayment($feeInvoice, $request->string('payment_method')->toString() ?: 'Manual');
-                    $updates['fees_payment_received'] = true;
+                    $feeInvoice = DB::table('invoices')->where('application_crm_id', $crmId)->orderByDesc('invoice_number')->first();
                 }
+                if ($feeInvoice !== null) {
+                    $fees->recordManualPayment($feeInvoice, $method);
+                }
+                $updates['status'] = ApplicationFeeService::STATUS_FEE_RECEIVED;
+                $updates['fees_payment_received'] = true;
+                break;
+            case 'confirm_payment':
+                $updates['status'] = 'Pending Review';
                 break;
             case 'begin_review':
                 $updates['status'] = 'Under Review';

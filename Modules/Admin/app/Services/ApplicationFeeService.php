@@ -25,6 +25,10 @@ class ApplicationFeeService
 
     public const APPLICATION_FEES = [self::FEE_APPLICATION_NEW, self::FEE_APPLICATION_RENEWAL];
 
+    public const STATUS_FEE_REQUIRED = 'Application Fee Required';
+
+    public const STATUS_FEE_RECEIVED = 'Fee Payment Received';
+
     /** The only QA Met Through pathway that is not a private institution (no multiple location fee). */
     public const PUBLIC_QA_MET_THROUGH = 'Public Institution Legislation';
 
@@ -211,6 +215,8 @@ class ApplicationFeeService
                 DB::table('applications')->where('crm_id', $application->crm_id)->update(['fees_payment_received' => true]);
                 if ($application->workflow_stage === 'draft' && ! $this->truthy($application->need_additional_details)) {
                     $this->submit($application);
+                } elseif ($application->workflow_stage === 'fee_required') {
+                    $this->feeReceived($application);
                 }
                 break;
 
@@ -243,7 +249,11 @@ class ApplicationFeeService
         }
     }
 
-    /** Draft -> Pending Review; a reopened draft goes straight back to Under Review. */
+    /**
+     * Draft -> Application Fee Required (or Fee Payment when the fee is already paid);
+     * a reopened draft goes straight back to Under Review. The receipt acknowledgement is
+     * only sent once the fee is paid, and Pending Review only follows the ministry's confirmation.
+     */
     public function submit(object $application): void
     {
         if ($this->truthy($application->need_additional_details)) {
@@ -258,15 +268,47 @@ class ApplicationFeeService
         }
 
         DB::table('applications')->where('crm_id', $application->crm_id)->update([
-            'workflow_stage' => 'pending_review',
-            'status' => 'Pending Review',
+            'workflow_stage' => 'fee_required',
+            'status' => self::STATUS_FEE_REQUIRED,
         ]);
 
         $institution = $this->institution($application);
         $feeInvoice = $this->invoiceFor($application->crm_id, self::APPLICATION_FEES)
             ?? $this->createApplicationFeeInvoice($application, $institution);
-        if ($institution !== null) {
-            $this->notifier->applicationSubmitted($institution, (string) $application->reference, $feeInvoice->fee_type === self::FEE_APPLICATION_RENEWAL);
+        if ($feeInvoice->invoice_status === 'Paid') {
+            $this->feeReceived($application);
+        }
+    }
+
+    /**
+     * Application fee paid (online or recorded by the ministry): the application is now complete,
+     * so acknowledge receipt to the institution and wait for the ministry to confirm the payment.
+     */
+    public function feeReceived(object $application): void
+    {
+        DB::table('applications')->where('crm_id', $application->crm_id)->update([
+            'workflow_stage' => 'fees_payment',
+            'status' => self::STATUS_FEE_RECEIVED,
+            'fees_payment_received' => true,
+        ]);
+
+        $institution = $this->institution($application);
+        $feeInvoice = $this->invoiceFor($application->crm_id, self::APPLICATION_FEES);
+        if ($institution === null || $feeInvoice === null) {
+            return;
+        }
+
+        $isReapplication = $feeInvoice->fee_type === self::FEE_APPLICATION_RENEWAL;
+        $reference = (string) $application->reference;
+        // Applications submitted before this rule were acknowledged on submission; don't send it twice.
+        $alreadySent = $reference !== '' && DB::table('sent_emails')
+            ->where('template_key', $isReapplication ? 'reapplication_submission' : 'application_submission')
+            ->where('institution_crm_id', $institution->crm_id)
+            ->where('status', 'sent')
+            ->where('body', 'like', '%'.$reference.'%')
+            ->exists();
+        if (! $alreadySent) {
+            $this->notifier->applicationSubmitted($institution, $reference, $isReapplication);
         }
     }
 

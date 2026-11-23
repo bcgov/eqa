@@ -26,8 +26,6 @@ const form = useForm({
     program_language_training: false,
     program_theological_education: false,
     program_trades_apprenticeship: false,
-    // SABC
-    sabc_designation: false,
     // EQA Brand Usage Plan
     media_pamphlet: false,
     media_website: false,
@@ -150,15 +148,6 @@ function submit() {
                         {{ label }}
                     </label>
                 </div>
-            </section>
-
-            <!-- SABC Designation -->
-            <section class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-                <h2 class="mb-4 text-sm font-semibold text-slate-700">Institution has SABC Designation?</h2>
-                <label class="flex items-center gap-2 text-sm text-slate-700">
-                    <input type="checkbox" v-model="form.sabc_designation" class="h-4 w-4 rounded border-slate-300 text-indigo-600" />
-                    Yes, the institution has an SABC Designation
-                </label>
             </section>
 
             <!-- EQA Brand Usage Plan -->

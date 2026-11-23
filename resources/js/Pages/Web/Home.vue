@@ -7,7 +7,7 @@ const props = defineProps({
     applications: { type: Array, default: () => [] },
 })
 
-const activeStatuses = ['Pending Review', 'Under Review', 'Suitability Review']
+const activeStatuses = ['Application Fee Required', 'Fee Payment Received', 'Pending Review', 'Under Review', 'Suitability Review']
 const hasActiveApplication = computed(() =>
     (props.applications || []).some((a) => activeStatuses.includes(a.status))
 )
@@ -16,7 +16,8 @@ function statusClass(s) {
     if (s === 'Approved') return 'bg-green-100 text-green-700'
     if (s === 'Not Approved') return 'bg-red-100 text-red-700'
     if (s === 'Under Review' || s === 'Suitability Review') return 'bg-amber-100 text-amber-700'
-    if (s === 'Pending Review') return 'bg-blue-100 text-blue-700'
+    if (s === 'Pending Review' || s === 'Fee Payment Received') return 'bg-blue-100 text-blue-700'
+    if (s === 'Application Fee Required') return 'bg-orange-100 text-orange-700'
     return 'bg-slate-100 text-slate-500'
 }
 </script>

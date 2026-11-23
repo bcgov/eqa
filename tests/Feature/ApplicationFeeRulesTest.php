@@ -57,11 +57,32 @@ class ApplicationFeeRulesTest extends TestCase
         $this->assertTrue($this->isReapplication());
     }
 
-    public function test_de_designated_institution_is_treated_as_a_renewal(): void
+    public function test_de_designated_status_without_a_past_designation_applies_as_new(): void
     {
         $this->institutionHas(['eqa_status' => 'De-Designated']);
 
-        $this->assertTrue($this->isReapplication(), 'Current rule: any status containing "designat" counts as previously designated.');
+        $this->assertFalse($this->isReapplication(), 'A never-designated institution is charged the new application fee.');
+    }
+
+    public function test_de_designated_institution_with_a_past_designation_is_a_renewal(): void
+    {
+        $this->institutionHas(['eqa_status' => 'De-Designated', 'designation_expiry' => '2024-06-30']);
+        $this->assertTrue($this->isReapplication());
+
+        $this->institutionHas(['designation_expiry' => null, 'de_designated_date' => '2025-03-01']);
+        $this->assertTrue($this->isReapplication());
+    }
+
+    public function test_first_time_submission_of_a_never_designated_institution_is_invoiced_the_new_fee(): void
+    {
+        $this->institutionHas(['eqa_status' => 'De-Designated']);
+        $application = $this->applicationWith(['status' => 'Draft', 'workflow_stage' => 'draft']);
+
+        $this->fees->submit($application);
+
+        $invoice = $this->fees->invoiceFor($application->crm_id, ApplicationFeeService::APPLICATION_FEES);
+        $this->assertSame(ApplicationFeeService::FEE_APPLICATION_NEW, $invoice->fee_type);
+        $this->assertEquals(7500, $invoice->total_charges);
     }
 
     public function test_not_approved_institution_applies_as_new(): void

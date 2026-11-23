@@ -51,7 +51,7 @@ class DesignationService
      * good-standing copy should track the institution's current standing.
      */
     private const OPEN_STAGES = [
-        'draft', 'pending_review', 'fees_payment', 'under_review',
+        'draft', 'fee_required', 'fees_payment', 'pending_review', 'under_review',
         'application_approval', 'suitability_review', 'not_approved', 'non_approval_reasons',
     ];
 

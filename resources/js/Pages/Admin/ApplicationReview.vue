@@ -25,9 +25,9 @@ const showPtiru = computed(() => {
 const stage = computed(() => props.application.workflow_stage || 'draft')
 
 const stageIndex = {
-    draft: 0, pending_review: 1, fees_payment: 2, under_review: 3,
-    application_approval: 4, not_approved: 4, non_approval_reasons: 4, suitability_review: 4,
-    admin_fee: 4, appeal_payment: 4, appeal_review: 4, end: 5,
+    draft: 0, fee_required: 1, fees_payment: 2, pending_review: 3, under_review: 4,
+    application_approval: 5, not_approved: 5, non_approval_reasons: 5, suitability_review: 5,
+    admin_fee: 5, appeal_payment: 5, appeal_review: 5, end: 6,
 }
 const activeIndex = computed(() => stageIndex[stage.value] ?? 0)
 const decisionLabel = computed(() => {
@@ -40,7 +40,8 @@ const decisionLabel = computed(() => {
     if (stage.value === 'end') return (props.application.status || '').startsWith('Approved') ? 'Application Approval' : 'Not Approved'
     return 'Decision'
 })
-const steps = computed(() => ['Draft Application', 'Pending Review', 'Fees Payment', 'Under Review', decisionLabel.value, 'End Process'])
+const steps = computed(() => ['Draft Application', 'Application Fee Required', 'Fee Payment', 'Pending Review', 'Under Review', decisionLabel.value, 'End Process'])
+const paymentMethod = ref('EFT')
 
 const notApproved = computed(() => ['Not Approved', 'Declined', 'Expired'].includes(props.application.status))
 
@@ -61,6 +62,7 @@ const busy = ref(false)
 const truthy = (v) => v === true || v === 't' || v === 1 || v === '1'
 const money = (v) => (v === null || v === undefined || v === '') ? '$0.00' : '$' + Number(v).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const locked = computed(() => stage.value === 'end')
+const feeUnpaid = computed(() => ['draft', 'fee_required'].includes(stage.value))
 const inputClass = 'mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-slate-500 focus:outline-none'
 
 const a = props.application
@@ -68,7 +70,6 @@ const form = useForm({
     receipt_confirmation: truthy(a.receipt_confirmation),
     fees_payment_received: truthy(a.fees_payment_received),
     ready_for_review: truthy(a.ready_for_review),
-    sabc_designation: truthy(a.sabc_designation),
     eligibility: a.eligibility ?? '',
     review_completion_date: a.review_completion_date ?? '',
     eqa_good_standing: truthy(a.eqa_good_standing),
@@ -207,24 +208,36 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
             <p v-else class="text-sm text-slate-600">The application is a draft. The institution must submit it before the review process begins.</p>
         </div>
 
-        <div v-else-if="stage === 'pending_review'">
-            <template v-if="applicationFeeInvoice">
-                <p v-if="applicationFeeInvoice.invoice_status === 'Paid'" class="mb-3 text-sm text-slate-600">
-                    The {{ feeLabels[applicationFeeInvoice.fee_type] }} was paid ({{ applicationFeeInvoice.payment_method || 'Express Pay' }}, ref {{ applicationFeeInvoice.transaction_reference || '—' }}). Confirm the payment to continue.
-                </p>
-                <p v-else class="mb-3 text-sm text-amber-700">
-                    The {{ feeLabels[applicationFeeInvoice.fee_type] }} ({{ money(applicationFeeInvoice.total_charges) }}) has not been paid online. Confirm only if payment was received by another method (e.g. cheque).
-                </p>
-                <button :disabled="busy" @click="advance('record_payment')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Confirm Payment →</button>
-            </template>
-            <template v-else>
-                <p class="mb-3 text-sm text-slate-600">Awaiting the application fee before review can begin.</p>
-                <button :disabled="busy" @click="advance('record_payment')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Record Fees Payment →</button>
-            </template>
+        <div v-else-if="stage === 'fee_required'">
+            <p class="mb-3 text-sm text-slate-600">
+                Waiting for the institution to pay the
+                <template v-if="applicationFeeInvoice">{{ feeLabels[applicationFeeInvoice.fee_type] }} ({{ money(applicationFeeInvoice.total_charges) }}, invoice {{ applicationFeeInvoice.invoice_number }})</template>
+                <template v-else>application fee</template>.
+                An online payment moves the application to Fee Payment automatically.
+            </p>
+            <p class="mb-3 text-sm text-amber-700">Record a payment only if it was received another way, such as EFT or cheque.</p>
+            <div class="flex flex-wrap items-end gap-2">
+                <label class="text-sm text-slate-600">Payment method
+                    <select v-model="paymentMethod" class="ml-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                        <option>EFT</option>
+                        <option>Cheque</option>
+                        <option>Other</option>
+                    </select>
+                </label>
+                <button :disabled="busy" @click="advance('record_payment', { payment_method: paymentMethod })" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Record Payment →</button>
+            </div>
         </div>
 
         <div v-else-if="stage === 'fees_payment'">
-            <p class="mb-3 text-sm text-slate-600">Fees received. Begin the eligibility review.</p>
+            <p v-if="applicationFeeInvoice" class="mb-3 text-sm text-slate-600">
+                The {{ feeLabels[applicationFeeInvoice.fee_type] }} was paid ({{ applicationFeeInvoice.payment_method || 'Express Pay' }}, ref {{ applicationFeeInvoice.transaction_reference || '—' }}). Confirm the payment to move the application to Pending Review.
+            </p>
+            <p v-else class="mb-3 text-sm text-slate-600">The application fee was recorded. Confirm the payment to move the application to Pending Review.</p>
+            <button :disabled="busy" @click="advance('confirm_payment')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Confirm Payment →</button>
+        </div>
+
+        <div v-else-if="stage === 'pending_review'">
+            <p class="mb-3 text-sm text-slate-600">Fee confirmed. Tick <b>Receipt Confirmation?</b> and <b>Ready to Review?</b> under General, save, then begin the eligibility review.</p>
             <button :disabled="busy" @click="advance('begin_review')" :class="[btn, 'bg-indigo-600 hover:bg-indigo-700']">Begin Review →</button>
         </div>
 
@@ -312,10 +325,15 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
             <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <h2 class="mb-3 text-sm font-semibold text-slate-700">General</h2>
                 <div class="space-y-2 text-sm text-slate-700">
-                    <label class="flex items-center gap-2"><input type="checkbox" v-model="form.receipt_confirmation" :disabled="locked" class="rounded"> Receipt Confirmation?</label>
+                    <label class="flex items-center gap-2"><input type="checkbox" v-model="form.receipt_confirmation" :disabled="locked || feeUnpaid" class="rounded"> Receipt Confirmation?</label>
+                    <p v-if="feeUnpaid" class="-mt-1 ml-6 text-xs text-slate-500">Available once the application fee is paid.</p>
+                    <p v-if="form.errors.receipt_confirmation" class="-mt-1 ml-6 text-xs text-red-600">{{ form.errors.receipt_confirmation }}</p>
                     <label class="flex items-center gap-2"><input type="checkbox" v-model="form.fees_payment_received" :disabled="locked" class="rounded"> Fees Payment Received?</label>
                     <label class="flex items-center gap-2"><input type="checkbox" v-model="form.ready_for_review" :disabled="locked" class="rounded"> Ready to Review?</label>
-                    <label class="flex items-center gap-2"><input type="checkbox" v-model="form.sabc_designation" :disabled="locked" class="rounded"> Institution has SABC Designation</label>
+                    <p v-if="truthy(application.sabc_designation)" class="flex items-center gap-2 text-slate-600">
+                        <input type="checkbox" checked disabled class="rounded" aria-hidden="true">
+                        Institution has SABC Designation <span class="text-xs text-slate-400">(no longer asked; recorded on this older application)</span>
+                    </p>
                 </div>
             </div>
 

@@ -37,6 +37,7 @@ class AdminInstitutionCreateTest extends TestCase
         $this->assertNotSame(Str::lower(self::GUID), $institution->bceid_business_guid);
         $this->assertSame('Vancouver', $institution->city);
         $this->assertSame('ID-0000 001', $institution->institution_number);
+        $this->assertSame('Pending', $institution->eqa_status);
     }
 
     public function test_generated_business_guid_skips_values_already_in_use(): void

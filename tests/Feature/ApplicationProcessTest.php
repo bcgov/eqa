@@ -87,16 +87,25 @@ class ApplicationProcessTest extends TestCase
         $this->asInstitution()->post("/web/applications/{$id}/submit")->assertSessionHas('success');
 
         $application = $this->application($id);
-        $this->assertSame('Pending Review', $application->status);
-        $this->assertSame('pending_review', $application->workflow_stage);
+        $this->assertSame('Application Fee Required', $application->status);
+        $this->assertSame('fee_required', $application->workflow_stage);
         $fee = $this->invoice($id, ApplicationFeeService::FEE_APPLICATION_NEW);
         $this->assertEquals(7500, $fee->total_charges);
         $this->assertSame('New Application Fee (fixed): $7,500.00', $fee->description);
-        $this->assertEmailed('application_submission');
+        $this->assertSame(0, DB::table('sent_emails')->where('template_key', 'application_submission')->count(), 'Receipt is only acknowledged once the fee is paid.');
 
         $this->payOnline($fee);
+        $this->assertEmailed('application_submission', $this->application($id)->reference);
         $this->assertSame('Paid', $this->invoice($id, ApplicationFeeService::FEE_APPLICATION_NEW)->invoice_status);
-        $this->assertEquals(1, $this->application($id)->fees_payment_received);
+        $application = $this->application($id);
+        $this->assertEquals(1, $application->fees_payment_received);
+        $this->assertSame('fees_payment', $application->workflow_stage);
+        $this->assertSame('Fee Payment Received', $application->status);
+
+        $this->advance($id, 'confirm_payment')->assertSessionHas('success');
+        $application = $this->application($id);
+        $this->assertSame('pending_review', $application->workflow_stage);
+        $this->assertSame('Pending Review', $application->status);
 
         $this->reviewUntil($id, 'under_review');
         $this->assertSame('Under Review', $this->application($id)->status);
@@ -125,18 +134,51 @@ class ApplicationProcessTest extends TestCase
         $this->assertEmailed('application_approved');
     }
 
-    public function test_application_fee_can_be_paid_by_another_method_and_confirmed_by_ministry(): void
+    public function test_application_fee_can_be_paid_by_eft_and_recorded_by_ministry(): void
     {
         $id = $this->submittedApplication();
 
-        $this->asMinistry()->put("/admin/applications/{$id}", ['receipt_confirmation' => true]);
-        $this->advance($id, 'record_payment', ['payment_method' => 'Cheque'])->assertSessionHas('success');
+        $this->advance($id, 'record_payment', ['payment_method' => 'EFT'])->assertSessionHas('success');
 
         $fee = $this->invoice($id, ApplicationFeeService::FEE_APPLICATION_NEW);
         $this->assertSame('Paid', $fee->invoice_status);
-        $this->assertSame('Cheque', $fee->payment_method);
-        $this->assertSame('fees_payment', $this->application($id)->workflow_stage);
+        $this->assertSame('EFT', $fee->payment_method);
+        $application = $this->application($id);
+        $this->assertSame('fees_payment', $application->workflow_stage);
+        $this->assertSame('Fee Payment Received', $application->status);
         $this->assertSame(0, DB::table('payment_transactions')->count());
+
+        $this->advance($id, 'record_payment', ['payment_method' => 'Bitcoin'])->assertSessionHas('error');
+    }
+
+    public function test_receipt_is_acknowledged_once_when_the_fee_is_recorded_and_not_confirmable_before(): void
+    {
+        $id = $this->submittedApplication();
+
+        $this->asMinistry()->put("/admin/applications/{$id}", ['receipt_confirmation' => true])->assertSessionHasErrors('receipt_confirmation');
+        $this->assertEquals(0, $this->application($id)->receipt_confirmation);
+        $this->assertSame(0, DB::table('sent_emails')->where('template_key', 'application_submission')->count());
+
+        $this->advance($id, 'record_payment', ['payment_method' => 'EFT'])->assertSessionHas('success');
+        $this->assertEmailed('application_submission', $this->application($id)->reference);
+
+        $this->asMinistry()->put("/admin/applications/{$id}", ['receipt_confirmation' => true])->assertSessionHasNoErrors();
+        $this->assertEquals(1, $this->application($id)->receipt_confirmation);
+    }
+
+    public function test_application_acknowledged_on_submission_under_the_old_flow_is_not_acknowledged_again(): void
+    {
+        $id = $this->submittedApplication();
+        DB::table('sent_emails')->insert([
+            'institution_crm_id' => self::INSTITUTION,
+            'template_key' => 'application_submission',
+            'body' => 'Please refer to order reference '.$this->application($id)->reference.'.',
+            'status' => 'sent',
+        ]);
+
+        $this->advance($id, 'record_payment', ['payment_method' => 'EFT'])->assertSessionHas('success');
+
+        $this->assertSame(1, DB::table('sent_emails')->where('template_key', 'application_submission')->count());
     }
 
     public function test_draft_cannot_be_paid_or_submitted_by_ministry(): void
@@ -167,16 +209,21 @@ class ApplicationProcessTest extends TestCase
     {
         $id = $this->submittedApplication();
 
-        $this->advance($id, 'record_payment')->assertSessionHas('error');
-        $this->assertSame('pending_review', $this->application($id)->workflow_stage);
-
-        $this->asMinistry()->put("/admin/applications/{$id}", ['receipt_confirmation' => true]);
-        $this->advance($id, 'record_payment')->assertSessionHas('success');
-
         $this->advance($id, 'begin_review')->assertSessionHas('error');
+        $this->assertSame('fee_required', $this->application($id)->workflow_stage, 'Review cannot begin before the fee is paid.');
+
+        $this->advance($id, 'record_payment', ['payment_method' => 'Cheque'])->assertSessionHas('success');
+        DB::table('applications')->where('crm_id', $id)->update(['fees_payment_received' => false]);
+        $this->advance($id, 'confirm_payment')->assertSessionHas('error');
         $this->assertSame('fees_payment', $this->application($id)->workflow_stage);
 
-        $this->asMinistry()->put("/admin/applications/{$id}", ['ready_for_review' => true]);
+        $this->asMinistry()->put("/admin/applications/{$id}", ['fees_payment_received' => true]);
+        $this->advance($id, 'confirm_payment')->assertSessionHas('success');
+
+        $this->advance($id, 'begin_review')->assertSessionHas('error');
+        $this->assertSame('pending_review', $this->application($id)->workflow_stage);
+
+        $this->asMinistry()->put("/admin/applications/{$id}", ['receipt_confirmation' => true, 'ready_for_review' => true]);
         $this->advance($id, 'begin_review')->assertSessionHas('success');
         $this->assertSame('under_review', $this->application($id)->workflow_stage);
     }
@@ -209,9 +256,9 @@ class ApplicationProcessTest extends TestCase
         $this->assertNull($this->invoice($id, ApplicationFeeService::FEE_APPLICATION_NEW));
         $this->assertEquals(5500, $fee->total_charges);
         $this->assertSame('Renewal Application Fee (fixed): $5,500.00', $fee->description);
-        $this->assertEmailed('reapplication_submission');
 
         $this->payOnline($fee);
+        $this->assertEmailed('reapplication_submission');
         $this->reviewUntil($id, 'under_review');
         $this->advance($id, 'eligible');
         $this->advance($id, 'approve');
@@ -489,6 +536,20 @@ class ApplicationProcessTest extends TestCase
         $this->assertSame(0, DB::table('invoices')->count(), 'Resubmitting does not charge the application fee again.');
     }
 
+    public function test_retired_sabc_designation_is_kept_on_older_applications_when_edited(): void
+    {
+        $draft = $this->applicationAt('draft', ['status' => 'Draft', 'sabc_designation' => true]);
+        $review = $this->applicationAt('pending_review', ['sabc_designation' => true]);
+
+        $this->asInstitution()->put("/web/applications/{$draft}", $this->applicationForm(['sabc_designation' => false]))->assertRedirect();
+        $this->asMinistry()->put("/admin/applications/{$review}", ['receipt_confirmation' => true, 'sabc_designation' => false])->assertRedirect();
+        $this->asInstitution()->post('/web/applications', $this->applicationForm(['sabc_designation' => true]));
+
+        $this->assertEquals(1, $this->application($draft)->sabc_designation);
+        $this->assertEquals(1, $this->application($review)->sabc_designation);
+        $this->assertNull(DB::table('applications')->whereNotIn('crm_id', [$draft, $review])->value('sabc_designation'));
+    }
+
     public function test_changes_not_provided_by_the_deadline_expire_the_application(): void
     {
         $id = $this->applicationAt('under_review');
@@ -520,16 +581,20 @@ class ApplicationProcessTest extends TestCase
         return $id;
     }
 
-    /** Ministry moves a submitted application with a paid fee forward to $stage. */
+    /** Ministry moves a submitted application forward to $stage, recording the fee by EFT if it is still unpaid. */
     private function reviewUntil(string $id, string $stage): void
     {
-        $this->asMinistry()->put("/admin/applications/{$id}", ['receipt_confirmation' => true]);
-        $this->advance($id, 'record_payment')->assertSessionHas('success');
-        if ($stage === 'fees_payment') {
+        if ($this->application($id)->workflow_stage === 'fee_required') {
+            $this->advance($id, 'record_payment', ['payment_method' => 'EFT'])->assertSessionHas('success');
+        }
+        if ($this->application($id)->workflow_stage === 'fees_payment') {
+            $this->advance($id, 'confirm_payment')->assertSessionHas('success');
+        }
+        if ($stage === 'pending_review') {
             return;
         }
 
-        $this->asMinistry()->put("/admin/applications/{$id}", ['ready_for_review' => true]);
+        $this->asMinistry()->put("/admin/applications/{$id}", ['receipt_confirmation' => true, 'ready_for_review' => true]);
         $this->advance($id, 'begin_review')->assertSessionHas('success');
     }
 

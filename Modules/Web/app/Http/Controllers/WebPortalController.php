@@ -691,8 +691,8 @@ class WebPortalController extends Controller
     /** @return array<string, mixed> */
     private function validatedApplication(Request $request): array
     {
+        // sabc_designation is retired: no longer asked, and never written, so values on older applications are kept.
         $flags = [
-            'sabc_designation',
             'program_associate_degree', 'program_university_transfer', 'program_bachelors_degree', 'program_graduate_degree',
             'program_career_training', 'program_language_training', 'program_theological_education', 'program_trades_apprenticeship',
             'media_pamphlet', 'media_website', 'media_brochure', 'media_poster', 'media_banner', 'media_billboard',
