@@ -599,6 +599,9 @@ class WebPortalController extends Controller
             ? ApplicationFeeService::FEE_APPLICATION_RENEWAL
             : ApplicationFeeService::FEE_APPLICATION_NEW;
         $amount = (float) config('eqa.fees.'.$feeType);
+        if ($fees->isFeeExempt($institution)) {
+            $amount = 0.0;
+        }
         $crmId = (string) Str::uuid();
 
         // Saved as a Draft; the application fee is invoiced once it is submitted.
@@ -669,6 +672,10 @@ class WebPortalController extends Controller
         }
 
         $invoice = $fees->openAppeal($application);
+        if ($invoice->invoice_status === 'Paid') {
+            return redirect('/web/applications/'.$crmId)
+                ->with('success', 'Appeal submitted. No appeal fee applies because your institution is fee exempt.');
+        }
 
         return redirect('/web/applications/'.$crmId)
             ->with('success', 'Appeal started. Pay the appeal fee (invoice '.$invoice->invoice_number.') to submit it.');

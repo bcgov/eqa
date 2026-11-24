@@ -16,6 +16,27 @@ const props = defineProps({
 const flash = computed(() => usePage().props.flash || {})
 const instId = computed(() => props.institution?.crm_id)
 
+// Fee exemption waives every fee (application, renewal, administrative, appeal); Ministry Admins only.
+const canSetFeeExempt = computed(() =>
+    (usePage().props.auth?.user?.roles ?? []).some((r) => r === 'Super Admin' || r === 'Ministry Admin'))
+const feeExempt = computed(() => [true, 1, '1', 't'].includes(props.institution?.fee_exempt))
+const savingFeeExempt = ref(false)
+function toggleFeeExempt(event) {
+    const exempt = event.target.checked
+    const message = exempt
+        ? `Mark ${props.institution?.name} as fee exempt? No application, renewal, administrative or appeal fees will be charged, and any invoice it still owes will be waived.`
+        : `Remove the fee exemption for ${props.institution?.name}? Standard fees will apply to new invoices.`
+    if (!confirm(message)) {
+        event.target.checked = !exempt
+        return
+    }
+    savingFeeExempt.value = true
+    router.put(`/admin/institutions/${instId.value}/fee-exempt`, { fee_exempt: exempt }, {
+        preserveScroll: true,
+        onFinish: () => { savingFeeExempt.value = false },
+    })
+}
+
 const institutionAddress = computed(() =>
     [props.institution?.street1, props.institution?.street2].filter(Boolean).join(', ')
 )
@@ -244,6 +265,18 @@ function removeDba(d) {
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Designation Start</dt><dd class="text-slate-800">{{ institution?.designation_start || '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Designation Expiry</dt><dd class="text-slate-800">{{ institution?.designation_expiry || '—' }}</dd></div>
             </dl>
+
+            <div v-if="!editingDesignation" class="mt-3 rounded-md border px-3 py-2 text-sm"
+                :class="feeExempt ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'">
+                <label class="flex items-start gap-2" :class="canSetFeeExempt ? 'cursor-pointer' : ''">
+                    <input type="checkbox" class="mt-0.5 rounded" :checked="feeExempt"
+                        :disabled="!canSetFeeExempt || savingFeeExempt" @change="toggleFeeExempt" />
+                    <span>
+                        <span class="font-medium text-slate-800">Fee exempt</span>
+                        <span class="block text-xs text-slate-500">No application, renewal, administrative or appeal fees are charged (e.g. Indigenous institutions exempt under the Act).<span v-if="!canSetFeeExempt"> Only a Ministry Admin can change this.</span></span>
+                    </span>
+                </label>
+            </div>
 
             <form v-else @submit.prevent="saveDesignation" class="space-y-3 text-sm">
                 <label class="block"><span class="text-slate-500">EQA Status</span>

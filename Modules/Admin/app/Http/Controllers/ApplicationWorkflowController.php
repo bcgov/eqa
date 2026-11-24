@@ -13,7 +13,6 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Modules\Admin\Services\ApplicationFeeService;
 use Modules\Admin\Services\DesignationService;
-use Modules\Admin\Services\ProcessNotifier;
 
 /**
  * Drives the EQA application approval Business Process Flow (migrated from the
@@ -272,45 +271,9 @@ class ApplicationWorkflowController extends Controller
             }
         });
 
-        // Notify on the designation decision (migrated CRM notification email).
-        // Gated by the global master switch (default OFF) inside the service.
-        $this->notifyDecision($action, $application, $updates, $today);
+        // No decline email: the institution receives a formal decision letter outside the system.
 
         return back()->with('success', 'Application advanced to '.str_replace('_', ' ', $next).'.');
-    }
-
-    /**
-     * Fire the application-decision notification email for approve / not-approved
-     * transitions. No-ops unless email sending is enabled and the template active.
-     *
-     * @param  array<string, mixed>  $updates
-     */
-    private function notifyDecision(string $action, object $application, array $updates, string $today): void
-    {
-        $isApproved = in_array($action, ['approve', 'pass'], true);
-        $isNotApproved = in_array($action, ['finalize', 'fail'], true);
-        if (! $isApproved && ! $isNotApproved) {
-            return;
-        }
-
-        $institution = null;
-        if (! empty($application->institution_crm_id) && Schema::hasTable('institutions')) {
-            $institution = DB::table('institutions')->where('crm_id', $application->institution_crm_id)->first();
-        }
-        if ($institution === null) {
-            $institution = (object) [
-                'crm_id' => $application->institution_crm_id ?? null,
-                'name' => (string) ($application->institution_name ?? 'Institution'),
-                'primary_contact' => null,
-            ];
-        }
-
-        $reference = (string) ($application->reference ?? $application->application_reference ?? $application->crm_id ?? '');
-
-        app(ProcessNotifier::class)->applicationDecision($isApproved, $institution, $reference, $today, [
-            'designation_expiry' => (string) ($updates['designation_expiry'] ?? $application->designation_expiry ?? ''),
-            'reasons' => (string) ($updates['non_approval_reasons'] ?? $application->non_approval_reasons ?? ''),
-        ]);
     }
 
     /** @return array<int, string> */

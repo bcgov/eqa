@@ -196,37 +196,23 @@ class ProcessNotifier
     }
 
     // ---------------------------------------------------------------------
-    // Application decision (to the institution contact) — "Application Approval
-    // Notification" workflow.
+    // Application approved (to the institution contact) — "Application Approval
+    // Notification" workflow. Declines and appeal outcomes are not emailed: the
+    // institution receives a formal letter outside the system.
     // ---------------------------------------------------------------------
 
     /** @param array<string, mixed> $extra */
-    public function applicationDecision(bool $approved, object $institution, string $reference, string $today, array $extra = []): void
+    public function applicationApproved(object $institution, string $reference, string $today, array $extra = []): void
     {
         $contact = $this->contact($institution);
-        $to = $contact['email'] ?: null;
-        $contactName = $contact['name'] !== '' ? $contact['name'] : 'Applicant';
-        $meta = ['institution_crm_id' => $institution->crm_id ?? null];
 
-        if ($approved) {
-            $this->emails->send('application_approved', [
-                'contact_name' => $contactName,
-                'institution_name' => (string) ($institution->name ?? ''),
-                'application_reference' => $reference,
-                'approved_date' => $today,
-                'designation_expiry' => (string) ($extra['designation_expiry'] ?? ''),
-            ], $to, $meta);
-
-            return;
-        }
-
-        $this->emails->send('application_not_approved', [
-            'contact_name' => $contactName,
+        $this->emails->send('application_approved', [
+            'contact_name' => $contact['name'] !== '' ? $contact['name'] : 'Applicant',
             'institution_name' => (string) ($institution->name ?? ''),
             'application_reference' => $reference,
-            'not_approved_date' => $today,
-            'reasons' => (string) ($extra['reasons'] ?? ''),
-        ], $to, $meta);
+            'approved_date' => $today,
+            'designation_expiry' => (string) ($extra['designation_expiry'] ?? ''),
+        ], $contact['email'] ?: null, ['institution_crm_id' => $institution->crm_id ?? null]);
     }
 
     // ---------------------------------------------------------------------

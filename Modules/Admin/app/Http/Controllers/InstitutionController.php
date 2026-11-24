@@ -12,12 +12,14 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
+use Modules\Admin\Services\ApplicationFeeService;
 use Modules\Admin\Services\BceidService;
 use Modules\Admin\Services\DesignationService;
 use Modules\Admin\Services\ProcessNotifier;
@@ -214,6 +216,46 @@ class InstitutionController extends Controller
         app(DesignationService::class)->applyInstitutionDesignation($crmId, $data);
 
         return redirect("/admin/institutions/{$crmId}")->with('success', 'Designation status updated.');
+    }
+
+    /**
+     * Ministry Admin marks the institution fee exempt (e.g. an Indigenous institution exempt under
+     * the Act): every fee (application, renewal, administrative, appeal) is $0, and any invoice it
+     * still owes is waived.
+     */
+    public function updateFeeExempt(Request $request, string $crmId): RedirectResponse
+    {
+        $institution = $this->institution($crmId);
+        abort_if($institution === null, 404);
+
+        $exempt = (bool) $request->validate(['fee_exempt' => ['required', 'boolean']])['fee_exempt'];
+        DB::table('institutions')->where('crm_id', $crmId)->update(['fee_exempt' => $exempt]);
+
+        // Exemption is legislated by institution type, so whatever it still owes is waived too.
+        $counts = $exempt
+            ? app(ApplicationFeeService::class)->waiveOutstandingInvoices($crmId)
+            : ['waived' => 0, 'skipped' => 0];
+
+        Log::info('Institution fee exemption '.($exempt ? 'granted' : 'removed'), [
+            'institution_crm_id' => $crmId,
+            'by' => $this->adminActor(),
+            'invoices_waived' => $counts['waived'],
+            'invoices_skipped' => $counts['skipped'],
+        ]);
+
+        if (! $exempt) {
+            return redirect("/admin/institutions/{$crmId}")->with('success', 'Fee exemption removed. Standard fees apply to new invoices.');
+        }
+
+        $message = 'Institution marked fee exempt. No fees will be charged';
+        $message .= $counts['waived'] > 0
+            ? '; '.$counts['waived'].' outstanding invoice'.($counts['waived'] === 1 ? ' was' : 's were').' waived.'
+            : '.';
+        if ($counts['skipped'] > 0) {
+            $message .= ' '.$counts['skipped'].' invoice'.($counts['skipped'] === 1 ? ' has' : 's have').' an Express Pay payment under review and '.($counts['skipped'] === 1 ? 'was' : 'were').' not waived.';
+        }
+
+        return redirect("/admin/institutions/{$crmId}")->with('success', $message);
     }
 
     // --- Locations (campuses) ------------------------------------------

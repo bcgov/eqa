@@ -1,14 +1,39 @@
 <script setup>
 import { Head, Link, usePage } from '@inertiajs/vue3'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import SortHeader from '../../Components/SortHeader.vue'
 
-defineProps({
+const props = defineProps({
     institution: { type: Object, default: null },
     applications: { type: Array, default: () => [] },
     hasActiveApplication: { type: Boolean, default: false },
 })
 
 const flash = computed(() => usePage().props.flash || {})
+
+// Client-side sorting: an institution's own applications all arrive on one page. Newest first by default.
+const sort = ref('application_date')
+const direction = ref('desc')
+function sortBy(column) {
+    if (sort.value === column) {
+        direction.value = direction.value === 'asc' ? 'desc' : 'asc'
+    } else {
+        sort.value = column
+        direction.value = column.endsWith('_date') ? 'desc' : 'asc'
+    }
+}
+const ariaSort = (column) => (sort.value === column ? (direction.value === 'asc' ? 'ascending' : 'descending') : 'none')
+const sortedApplications = computed(() => {
+    const key = sort.value
+    const factor = direction.value === 'asc' ? 1 : -1
+    return [...props.applications].sort((a, b) => {
+        const x = a[key] ?? ''
+        const y = b[key] ?? ''
+        // Blank values (e.g. no approval date yet) always sort last.
+        if (x === '' || y === '') return x === y ? 0 : (x === '' ? 1 : -1)
+        return String(x).localeCompare(String(y), 'en-CA', { numeric: true, sensitivity: 'base' }) * factor
+    })
+})
 
 function statusClass(s) {
     if (s && s.startsWith('Approved')) return 'bg-green-100 text-green-700'
@@ -39,15 +64,15 @@ function statusClass(s) {
         <table class="min-w-full divide-y divide-slate-200 text-sm">
             <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                    <th class="px-3 py-2.5">Reference #</th>
-                    <th class="px-3 py-2.5">Application Date</th>
-                    <th class="px-3 py-2.5">Approval Date</th>
-                    <th class="px-3 py-2.5">Status</th>
-                    <th class="px-3 py-2.5"></th>
+                    <th class="px-3 py-2.5" :aria-sort="ariaSort('reference')"><SortHeader label="Reference #" column="reference" :sort="sort" :direction="direction" @sort="sortBy" /></th>
+                    <th class="px-3 py-2.5" :aria-sort="ariaSort('application_date')"><SortHeader label="Application Date" column="application_date" :sort="sort" :direction="direction" @sort="sortBy" /></th>
+                    <th class="px-3 py-2.5" :aria-sort="ariaSort('approved_date')"><SortHeader label="Approval Date" column="approved_date" :sort="sort" :direction="direction" @sort="sortBy" /></th>
+                    <th class="px-3 py-2.5" :aria-sort="ariaSort('status')"><SortHeader label="Status" column="status" :sort="sort" :direction="direction" @sort="sortBy" /></th>
+                    <th class="px-3 py-2.5"><span class="sr-only">Actions</span></th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
-                <tr v-for="a in applications" :key="a.crm_id" class="hover:bg-slate-50">
+                <tr v-for="a in sortedApplications" :key="a.crm_id" class="hover:bg-slate-50">
                     <td class="px-3 py-2 font-mono text-xs text-slate-600">{{ a.reference }}</td>
                     <td class="px-3 py-2 text-slate-600">{{ a.application_date || '—' }}</td>
                     <td class="px-3 py-2 text-slate-600">{{ a.approved_date || '—' }}</td>

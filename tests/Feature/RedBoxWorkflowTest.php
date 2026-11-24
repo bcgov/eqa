@@ -330,7 +330,7 @@ class RedBoxWorkflowTest extends TestCase
     {
         $id = $this->declinedApplication();
 
-        $this->assertNotified('application_not_approved');
+        $this->assertSame(0, DB::table('sent_emails')->count(), 'No decline email: the institution receives a formal letter.');
         $this->viewApplication($id)->assertJsonPath('props.canAppeal', true);
 
         $this->travel(31)->days();
@@ -383,7 +383,7 @@ class RedBoxWorkflowTest extends TestCase
         ]);
 
         $this->assertSame('Approved (Under Compliance Order)', $this->application($id)->status);
-        $this->assertNotified('application_approved_fee_due', 'Quarterly reporting for one year.');
+        $this->assertSame(0, DB::table('sent_emails')->where('template_key', 'application_approved_fee_due')->count(), 'Approved on appeal: the ADM sends a formal letter.');
     }
 
     // Helpers ------------------------------------------------------------------

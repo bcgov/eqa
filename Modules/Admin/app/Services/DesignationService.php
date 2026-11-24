@@ -16,9 +16,10 @@ use Illuminate\Support\Facades\DB;
  *  - Approving an application (Designation Decision = Approved) designates the
  *    institution: EQA Status = Designated and the designation start/expiry dates
  *    are stamped.                                        [application -> institution]
- *  - Not approving an application that was never designated marks the institution
- *    Not Approved; an already-designated institution keeps its designation until a
- *    ministry de-designates it explicitly.               [application -> institution]
+ *  - Not approving a re-application de-designates a Designated institution
+ *    (De-Designated, dated today); a never-designated applicant becomes Not
+ *    Approved. A designation whose expiry passes without an approved renewal is
+ *    de-designated by the daily deadline job.          [application -> institution]
  *  - An application's "EQA in Good Standing" / "PTIRU in Good Standing" are a locked
  *    copy of the institution's EQA / PTIRU Standing (read-only on the CRM app form),
  *    so changing an institution's standing cascades onto its OPEN applications.
@@ -194,9 +195,10 @@ class DesignationService
     }
 
     /**
-     * Application not approved -> only marks a never-designated institution
-     * (EQA Status still Pending / unset) as Not Approved. An already-designated
-     * institution keeps its designation until a ministry de-designates it.
+     * Application not approved. A declined re-application de-designates a Designated
+     * institution (de-designated today); a never-designated institution (EQA Status
+     * Pending / unset) becomes Not Approved, since de-designation doesn't apply to a
+     * first-time applicant. An institution already De-Designated keeps its original date.
      */
     public function onApplicationNotApproved(object $application): void
     {
@@ -207,11 +209,39 @@ class DesignationService
         if ($institution === null) {
             return;
         }
-        if (in_array($institution->eqa_status, [null, '', 'Pending'], true)) {
+        if ($institution->eqa_status === 'Designated') {
+            DB::table('institutions')
+                ->where('crm_id', $application->institution_crm_id)
+                ->update(['eqa_status' => 'De-Designated', 'de_designated_date' => self::today()]);
+        } elseif (in_array($institution->eqa_status, [null, '', 'Pending'], true)) {
             DB::table('institutions')
                 ->where('crm_id', $application->institution_crm_id)
                 ->update(['eqa_status' => 'Not Approved']);
         }
+    }
+
+    /**
+     * Daily sweep: a Designated institution whose designation expiry has passed is
+     * De-Designated (dated today) unless an approved renewal carries it forward, i.e.
+     * an application approved with an expiry still ahead (including one awaiting its
+     * administrative fee). Returns the number of institutions de-designated.
+     */
+    public function deDesignateLapsed(): int
+    {
+        $today = self::today();
+
+        return DB::table('institutions')
+            ->where('eqa_status', 'Designated')
+            ->whereNotNull('designation_expiry')
+            ->where('designation_expiry', '<', $today)
+            ->whereNotExists(function ($q) use ($today): void {
+                $q->select(DB::raw(1))
+                    ->from('applications as a')
+                    ->whereColumn('a.institution_crm_id', 'institutions.crm_id')
+                    ->where('a.status', 'like', 'Approved%')
+                    ->where('a.designation_expiry', '>=', $today);
+            })
+            ->update(['eqa_status' => 'De-Designated', 'de_designated_date' => $today]);
     }
 
     /**

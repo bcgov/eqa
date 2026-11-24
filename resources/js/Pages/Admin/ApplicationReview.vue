@@ -1,6 +1,6 @@
 <script setup>
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import ManualPaymentForm from '../../Components/ManualPaymentForm.vue'
 
 const props = defineProps({
@@ -127,6 +127,20 @@ const form = useForm({
     affirm_authorized: truthy(a.affirm_authorized),
     representative_signature: a.representative_signature ?? '',
 })
+
+// Begin Review copies the institution's standing onto the application server-side;
+// the page component is reused after the visit, so re-sync the checkboxes from the
+// fresh props instead of keeping the stale defaults (which would overwrite the copy).
+watch(
+    () => [props.application.eqa_good_standing, props.application.ptib_good_standing],
+    ([eqa, ptib]) => {
+        eqaGood.value = eqa ?? true
+        ptibGood.value = ptib ?? true
+        form.eqa_good_standing = truthy(eqa)
+        form.ptib_good_standing = truthy(ptib)
+        form.defaults({ eqa_good_standing: truthy(eqa), ptib_good_standing: truthy(ptib) })
+    },
+)
 
 const dateFields = ['review_completion_date', 'suitability_review_date', 'resubmission_date', 'approved_date', 'designation_expiry', 'not_approved_date', 'eligibility']
 

@@ -131,7 +131,7 @@ const affirmations = computed(() => [
             </table>
 
             <p v-if="unpaidFee" class="mb-4 text-sm text-slate-600">Pay online, or pay by cheque or another method and EQA staff will confirm your payment.</p>
-            <p v-if="awaitingSubmission" class="mb-4 text-sm text-slate-600">Your application has not been submitted. You can edit it until you submit it; the application fee is invoiced on submission.</p>
+            <p v-if="awaitingSubmission" class="mb-4 text-sm text-slate-600">Your application has not been submitted. You can edit it until you submit it; <template v-if="[true, 1, '1', 't'].includes(institution?.fee_exempt)">no application fee applies because your institution is fee exempt.</template><template v-else>the application fee is invoiced on submission.</template></p>
 
             <div class="flex flex-wrap gap-2">
                 <Link v-if="canEdit" :href="`/web/applications/${application.crm_id}/edit`" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Edit Application</Link>

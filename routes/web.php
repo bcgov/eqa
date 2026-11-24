@@ -201,5 +201,8 @@ Route::middleware('role:'.Role::MINISTRY_ADMIN.','.Role::SUPER_ADMIN)->group(fun
 
     Route::get('/admin/maintenance/invoice', [MaintenanceController::class, 'invoice'])->name('admin.maintenance.invoice');
     Route::get('/admin/maintenance/invoice/preview', [MaintenanceController::class, 'previewInvoice'])->name('admin.maintenance.invoice.preview');
+
+    // Fee exemption waives every fee for the institution, so it is limited to Ministry Admins.
+    Route::put('/admin/institutions/{crmId}/fee-exempt', [InstitutionController::class, 'updateFeeExempt'])->name('admin.institution.fee-exempt');
 });
 });

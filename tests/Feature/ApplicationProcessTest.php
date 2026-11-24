@@ -393,6 +393,98 @@ class ApplicationProcessTest extends TestCase
         $this->assertNotSame('Designated', $this->institution()->eqa_status);
     }
 
+    // Fee exempt --------------------------------------------------------------------------
+
+    public function test_fee_exempt_institution_is_never_charged_from_submission_to_designation(): void
+    {
+        DB::table('institutions')->where('crm_id', self::INSTITUTION)->update(['fee_exempt' => true]);
+        $id = $this->startApplication(['intl_students_permit' => 40]);
+        $this->assertEquals(0, $this->application($id)->application_fee);
+
+        $this->asInstitution()->post("/web/applications/{$id}/submit")->assertSessionHas('success');
+
+        $fee = $this->invoice($id, ApplicationFeeService::FEE_APPLICATION_NEW);
+        $this->assertEquals(0, $fee->total_charges);
+        $this->assertSame('Paid', $fee->invoice_status);
+        $this->assertSame(ApplicationFeeService::METHOD_FEE_EXEMPT, $fee->payment_method);
+        $this->assertSame('New Application Fee (waived, fee exempt institution): $0.00', $fee->description);
+        $this->assertSame('pending_review', $this->application($id)->workflow_stage, 'No payment for the ministry to confirm.');
+        $this->assertEmailed('application_submission', $this->application($id)->reference);
+        $this->assertSame(0, DB::table('sent_emails')->where('template_key', 'payment_receipt')->count(), 'Nothing was paid, so no receipt.');
+
+        $this->reviewUntil($id, 'under_review');
+        $this->advance($id, 'eligible', ['eqa_good_standing' => true])->assertSessionHas('success');
+        $this->advance($id, 'approve')->assertSessionHas('success');
+
+        $adminFee = $this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE);
+        $this->assertEquals(0, $adminFee->total_charges, '40 study permit students would otherwise be charged.');
+        $this->assertSame(ApplicationFeeService::METHOD_FEE_EXEMPT, $adminFee->payment_method);
+        $this->assertSame('end', $this->application($id)->workflow_stage);
+        $this->assertSame('Designated', $this->institution()->eqa_status);
+        $this->assertSame(0, DB::table('sent_emails')->where('template_key', 'application_approved_fee_due')->count());
+    }
+
+    public function test_fee_exempt_renewal_and_appeal_are_not_charged(): void
+    {
+        DB::table('institutions')->where('crm_id', self::INSTITUTION)->update([
+            'fee_exempt' => true, 'eqa_status' => 'Designated', 'designation_start' => '2020-04-01',
+        ]);
+        $renewal = $this->submittedApplication();
+        $this->assertEquals(0, $this->invoice($renewal, ApplicationFeeService::FEE_APPLICATION_RENEWAL)->total_charges);
+
+        $id = $this->declinedApplication();
+        $this->asInstitution()->post("/web/applications/{$id}/appeal")->assertSessionHas('success');
+
+        $appealFee = $this->invoice($id, ApplicationFeeService::FEE_APPEAL);
+        $this->assertEquals(0, $appealFee->total_charges);
+        $this->assertSame('Paid', $appealFee->invoice_status);
+        $this->assertSame('appeal_review', $this->application($id)->workflow_stage);
+    }
+
+    public function test_marking_fee_exempt_waives_what_the_institution_still_owes(): void
+    {
+        $submitted = $this->submittedApplication();
+        $approved = $this->applicationAt('application_approval');
+        $this->advance($approved, 'approve');
+        $underReview = $this->declinedApplication();
+        $this->asInstitution()->post("/web/applications/{$underReview}/appeal");
+        $appealFee = $this->invoice($underReview, ApplicationFeeService::FEE_APPEAL);
+        DB::table('payment_transactions')->insert([
+            'order_number' => 1234567, 'invoice_crm_id' => $appealFee->crm_id, 'amount' => 250,
+            'status' => \App\Services\ExpressPayService::REVIEW, 'hash_expires_at' => now(),
+        ]);
+
+        $this->asMinistry()->put('/admin/institutions/'.self::INSTITUTION.'/fee-exempt', ['fee_exempt' => true])
+            ->assertSessionHas('success', 'Institution marked fee exempt. No fees will be charged; 2 outstanding invoices were waived. 1 invoice has an Express Pay payment under review and was not waived.');
+
+        $fee = $this->invoice($submitted, ApplicationFeeService::FEE_APPLICATION_NEW);
+        $this->assertEquals(0, $fee->total_charges);
+        $this->assertSame('Paid', $fee->invoice_status);
+        $this->assertSame(ApplicationFeeService::METHOD_FEE_EXEMPT, $fee->payment_method);
+        $this->assertStringContainsString('originally $7,500.00', $fee->payment_notes);
+        $this->assertSame('New Application Fee (waived, fee exempt institution): $0.00', $fee->description);
+        $this->assertSame('pending_review', $this->application($submitted)->workflow_stage);
+        $this->assertEquals(0, $this->application($submitted)->total_due);
+
+        $this->assertSame('Paid', $this->invoice($approved, ApplicationFeeService::FEE_ADMIN_VARIABLE)->invoice_status);
+        $this->assertSame('end', $this->application($approved)->workflow_stage);
+        $this->assertSame('Designated', $this->institution()->eqa_status);
+
+        $this->assertEquals(250, $this->invoice($underReview, ApplicationFeeService::FEE_APPEAL)->total_charges, 'A payment under review is not waived.');
+    }
+
+    public function test_only_a_ministry_admin_can_set_fee_exempt(): void
+    {
+        $staff = $this->user('user@process.example', Role::MINISTRY_USER, ['idir_user_guid' => 'PROCESSUSER']);
+        $this->actingAs($staff)->withSession(['portal_role' => 'ministry'])
+            ->put('/admin/institutions/'.self::INSTITUTION.'/fee-exempt', ['fee_exempt' => true])
+            ->assertForbidden();
+        $this->assertEquals(0, $this->institution()->fee_exempt);
+
+        $this->asMinistry()->put('/admin/institutions/'.self::INSTITUTION.'/fee-exempt', ['fee_exempt' => true])->assertSessionHas('success');
+        $this->assertEquals(1, $this->institution()->fee_exempt);
+    }
+
     // Suitability review ----------------------------------------------------------------
 
     public function test_suitability_review_passed_leads_to_approval(): void
@@ -436,17 +528,52 @@ class ApplicationProcessTest extends TestCase
         $this->assertEquals(0, $application->designation_decision);
         $this->assertSame($this->vancouverDate(30), $application->appeal_deadline);
         $this->assertSame('Not Approved', $this->institution()->eqa_status, 'A never-designated institution becomes Not Approved.');
-        $this->assertEmailed('application_not_approved');
+        $this->assertSame(0, DB::table('sent_emails')->count(), 'No decline email: the institution receives a formal letter.');
         $this->viewApplication($id)->assertJsonPath('props.canAppeal', true);
     }
 
-    public function test_declined_renewal_keeps_an_existing_designation(): void
+    public function test_declined_renewal_de_designates_the_institution(): void
     {
         DB::table('institutions')->where('crm_id', self::INSTITUTION)->update(['eqa_status' => 'Designated', 'designation_start' => '2020-04-01']);
 
         $this->declinedApplication();
 
+        $this->assertSame('De-Designated', $this->institution()->eqa_status);
+        $this->assertSame($this->vancouverDate(0), $this->institution()->de_designated_date);
+    }
+
+    public function test_daily_job_de_designates_a_lapsed_designation(): void
+    {
+        DB::table('institutions')->where('crm_id', self::INSTITUTION)->update([
+            'eqa_status' => 'Designated', 'designation_start' => '2020-04-01', 'designation_expiry' => $this->vancouverDate(0),
+        ]);
+
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
+        $this->assertSame('Designated', $this->institution()->eqa_status, 'Still designated on its expiry date.');
+
+        $this->travel(1)->days();
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
+
+        $this->assertSame('De-Designated', $this->institution()->eqa_status);
+        $this->assertSame($this->vancouverDate(0), $this->institution()->de_designated_date);
+    }
+
+    public function test_approved_renewal_awaiting_admin_fee_holds_the_designation_until_it_expires(): void
+    {
+        DB::table('institutions')->where('crm_id', self::INSTITUTION)->update([
+            'eqa_status' => 'Designated', 'designation_start' => '2020-04-01', 'designation_expiry' => $this->vancouverDate(-1),
+        ]);
+        $id = $this->applicationAt('application_approval');
+        $this->advance($id, 'approve');
+
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
         $this->assertSame('Designated', $this->institution()->eqa_status);
+
+        $this->travel(31)->days();
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
+
+        $this->assertSame('Expired', $this->application($id)->status);
+        $this->assertSame('De-Designated', $this->institution()->eqa_status);
     }
 
     public function test_a_new_application_can_start_after_a_decline_is_final(): void
@@ -485,11 +612,17 @@ class ApplicationProcessTest extends TestCase
 
         $this->advance($id, 'approve', ['compliance_order' => true, 'compliance_order_notes' => 'Quarterly reporting.'])->assertSessionHas('success');
         $this->assertSame('Approved (Under Compliance Order)', $this->application($id)->status);
+
+        $this->payOnline($this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE));
+        $this->assertSame('end', $this->application($id)->workflow_stage);
+        $this->assertSame(0, DB::table('sent_emails')->whereIn('template_key', ['application_approved_fee_due', 'application_approved'])->count(),
+            'An appeal decision is sent by the ADM as a formal letter, not emailed.');
     }
 
     public function test_appeal_upheld_declines_the_application(): void
     {
         $id = $this->appealUnderReview();
+        $emailsBefore = DB::table('sent_emails')->count();
 
         $this->advance($id, 'appeal_uphold')->assertSessionHas('success');
 
@@ -497,6 +630,7 @@ class ApplicationProcessTest extends TestCase
         $this->assertSame('Declined', $application->status);
         $this->assertSame('Upheld', $application->appeal_decision);
         $this->assertSame('end', $application->workflow_stage);
+        $this->assertSame($emailsBefore, DB::table('sent_emails')->count(), 'No appeal decision email.');
         $this->viewApplication($id)->assertJsonPath('props.canAppeal', false);
     }
 

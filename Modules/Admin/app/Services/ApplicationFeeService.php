@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Modules\Admin\Services;
 
+use App\Services\ExpressPayService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -27,9 +28,19 @@ class ApplicationFeeService
 
     public const APPLICATION_FEES = [self::FEE_APPLICATION_NEW, self::FEE_APPLICATION_RENEWAL];
 
+    private const FEE_LABELS = [
+        self::FEE_APPLICATION_NEW => 'New Application Fee',
+        self::FEE_APPLICATION_RENEWAL => 'Renewal Application Fee',
+        self::FEE_ADMIN_VARIABLE => 'Administrative Fee',
+        self::FEE_APPEAL => 'Appeal Fee',
+    ];
+
     public const STATUS_FEE_REQUIRED = 'Application Fee Required';
 
     public const STATUS_FEE_RECEIVED = 'Fee Payment Received';
+
+    /** Payment method recorded on the $0 invoices of a fee exempt institution. */
+    public const METHOD_FEE_EXEMPT = 'Fee Exempt';
 
     /** The only QA Met Through pathway that is not a private institution (no multiple location fee). */
     public const PUBLIC_QA_MET_THROUGH = 'Public Institution Legislation';
@@ -91,17 +102,36 @@ class ApplicationFeeService
     }
 
     /** @return array{amount: float, description: string, line_items: list<array<string, mixed>>} */
-    public function applicationFeeQuote(string $feeType): array
+    public function applicationFeeQuote(string $feeType, ?object $institution = null): array
     {
         $label = $feeType === self::FEE_APPLICATION_RENEWAL ? 'Renewal Application Fee' : 'New Application Fee';
+        if ($this->isFeeExempt($institution)) {
+            return $this->waivedQuote($feeType, $label);
+        }
 
         return $this->quote([$this->line($feeType, $label.' (fixed)', 1, (float) config('eqa.fees.'.$feeType))]);
     }
 
     /** @return array{amount: float, description: string, line_items: list<array<string, mixed>>} */
-    public function appealFeeQuote(): array
+    public function appealFeeQuote(?object $institution = null): array
     {
+        if ($this->isFeeExempt($institution)) {
+            return $this->waivedQuote(self::FEE_APPEAL, 'Appeal Fee');
+        }
+
         return $this->quote([$this->line(self::FEE_APPEAL, 'Appeal Fee (fixed)', 1, (float) config('eqa.fees.appeal'))]);
+    }
+
+    /** Fee exempt institutions (e.g. Indigenous institutions exempt under the Act) are never charged any fee. */
+    public function isFeeExempt(?object $institution): bool
+    {
+        return $institution !== null && $this->truthy($institution->fee_exempt ?? null);
+    }
+
+    /** @return array{amount: float, description: string, line_items: list<array<string, mixed>>} */
+    private function waivedQuote(string $code, string $label): array
+    {
+        return $this->quote([$this->line($code, $label.' (waived, fee exempt institution)', 1, 0.0)]);
     }
 
     /**
@@ -113,6 +143,9 @@ class ApplicationFeeService
     public function adminFeeQuote(object $application): array
     {
         $institution = $this->institution($application);
+        if ($this->isFeeExempt($institution)) {
+            return $this->waivedQuote(self::FEE_ADMIN_VARIABLE, 'Administrative Fee');
+        }
         $qaMetThrough = trim((string) ($institution->qa_met_through ?? ''));
         $private = $qaMetThrough !== self::PUBLIC_QA_MET_THROUGH;
         $locations = $institution !== null
@@ -291,9 +324,100 @@ class ApplicationFeeService
         $institution = $this->institution($application);
         $feeInvoice = $this->invoiceFor($application->crm_id, self::APPLICATION_FEES)
             ?? $this->createApplicationFeeInvoice($application, $institution);
+
+        // Nothing to pay (fee exempt institution): settling the $0 invoice completes the application,
+        // and with no payment for the ministry to confirm it goes straight to Pending Review.
+        if ($this->settleIfNothingDue($feeInvoice, $institution)) {
+            $this->skipFeeConfirmation((string) $application->crm_id);
+
+            return;
+        }
+
         if ($feeInvoice->invoice_status === 'Paid') {
             $this->feeReceived($application);
         }
+    }
+
+    /**
+     * Settle an unpaid invoice with nothing due (no charge, or a fee exempt institution) so the
+     * workflow moves on as if it were paid. Returns whether it was settled.
+     */
+    private function settleIfNothingDue(object $invoice, ?object $institution): bool
+    {
+        if (($invoice->invoice_status ?? null) === 'Paid' || (float) ($invoice->total_charges ?? 0) > 0) {
+            return false;
+        }
+
+        $this->recordManualPayment($invoice, $this->isFeeExempt($institution) ? self::METHOD_FEE_EXEMPT : 'No Charge');
+
+        return true;
+    }
+
+    /**
+     * The institution was just marked fee exempt: waive every invoice it still owes. Each one is
+     * rewritten to $0 (the original charge is kept in the payment notes), settled as Fee Exempt and
+     * its application moves on as if it were paid. Paid invoices are left alone (any refund happens
+     * outside the system), as are invoices whose Express Pay payment is under review.
+     *
+     * @return array{waived: int, skipped: int}
+     */
+    public function waiveOutstandingInvoices(string $institutionCrmId): array
+    {
+        $expressPay = app(ExpressPayService::class);
+        $counts = ['waived' => 0, 'skipped' => 0];
+
+        $outstanding = DB::table('invoices')
+            ->where('institution_crm_id', $institutionCrmId)
+            ->whereNotIn('invoice_status', ['Paid', 'Expired'])
+            ->orderBy('invoice_number')
+            ->get();
+
+        foreach ($outstanding as $invoice) {
+            $due = $expressPay->amountDue($invoice);
+            if ($due <= 0) {
+                continue;
+            }
+            if (! $expressPay->isPayable($invoice)) {
+                $counts['skipped']++;
+
+                continue;
+            }
+
+            $quote = $this->waivedQuote((string) ($invoice->fee_type ?: 'fee'), self::FEE_LABELS[$invoice->fee_type] ?? 'Fee');
+            $notes = 'Waived on '.$this->today().': institution marked fee exempt (originally $'.number_format($due, 2).').';
+            DB::table('invoices')->where('crm_id', $invoice->crm_id)->update([
+                'invoice_amount' => 0,
+                'taxes' => 0,
+                'total_charges' => 0,
+                'invoice_balance' => 0,
+                'description' => $quote['description'],
+                'line_items' => json_encode($quote['line_items']),
+            ]);
+            if (in_array($invoice->fee_type, self::APPLICATION_FEES, true)) {
+                DB::table('applications')->where('crm_id', $invoice->application_crm_id)->update(['application_fee' => 0, 'total_due' => 0]);
+            }
+
+            $this->recordManualPayment(
+                DB::table('invoices')->where('crm_id', $invoice->crm_id)->first(),
+                self::METHOD_FEE_EXEMPT,
+                ['notes' => trim(($invoice->payment_notes ? $invoice->payment_notes."\n" : '').$notes)],
+            );
+            if (in_array($invoice->fee_type, self::APPLICATION_FEES, true)) {
+                $this->skipFeeConfirmation((string) $invoice->application_crm_id);
+            }
+            $counts['waived']++;
+        }
+
+        return $counts;
+    }
+
+    /** A waived application fee leaves no payment for the ministry to confirm: Fee Payment -> Pending Review. */
+    private function skipFeeConfirmation(string $applicationCrmId): void
+    {
+        DB::table('applications')
+            ->where('crm_id', $applicationCrmId)
+            ->where('workflow_stage', 'fees_payment')
+            ->update(['workflow_stage' => 'pending_review', 'status' => 'Pending Review']);
     }
 
     /**
@@ -345,7 +469,7 @@ class ApplicationFeeService
         $feeType = $institution !== null && $this->notifier->isReapplication($institution)
             ? self::FEE_APPLICATION_RENEWAL
             : self::FEE_APPLICATION_NEW;
-        $quote = $this->applicationFeeQuote($feeType);
+        $quote = $this->applicationFeeQuote($feeType, $institution);
 
         DB::table('applications')->where('crm_id', $application->crm_id)->update([
             'application_fee' => $quote['amount'],
@@ -407,7 +531,7 @@ class ApplicationFeeService
         }
     }
 
-    /** Approval (optionally under a compliance order): raise the administrative fee invoice and send the decision. */
+    /** Approval (optionally under a compliance order): raise the administrative fee invoice and send the decision (not after an appeal). */
     public function approve(object $application, bool $complianceOrder, string $complianceNotes): object
     {
         $today = $this->today();
@@ -427,15 +551,13 @@ class ApplicationFeeService
         $application = DB::table('applications')->where('crm_id', $application->crm_id)->first();
         $invoice = $this->createQuotedInvoice($application, self::FEE_ADMIN_VARIABLE, $quote, $due);
 
-        // Nothing to pay (e.g. public institution, no international students): designate now.
-        if ($quote['amount'] <= 0) {
-            $this->recordManualPayment($invoice, 'No Charge');
-
+        // Nothing to pay (e.g. public institution with no international students, or fee exempt): designate now.
+        if ($this->settleIfNothingDue($invoice, $this->institution($application))) {
             return DB::table('invoices')->where('crm_id', $invoice->crm_id)->first();
         }
 
         $institution = $this->institution($application);
-        if ($institution !== null) {
+        if ($institution !== null && ! $this->decidedOnAppeal($application)) {
             $this->notifier->approvedFeeDue($institution, $application, $invoice, $complianceOrder, $complianceNotes);
         }
 
@@ -451,7 +573,7 @@ class ApplicationFeeService
             && empty($application->appeal_decision);
     }
 
-    /** Institution chooses to appeal: raise the appeal fee invoice (status Pending Appeal). */
+    /** Institution chooses to appeal: raise the appeal fee invoice (status Pending Appeal); a fee exempt appeal goes straight to review. */
     public function openAppeal(object $application): object
     {
         DB::table('applications')->where('crm_id', $application->crm_id)->update([
@@ -459,7 +581,13 @@ class ApplicationFeeService
             'status' => 'Pending Appeal',
         ]);
 
-        return $this->createQuotedInvoice($application, self::FEE_APPEAL, $this->appealFeeQuote(), (string) $application->appeal_deadline);
+        $institution = $this->institution($application);
+        $invoice = $this->createQuotedInvoice($application, self::FEE_APPEAL, $this->appealFeeQuote($institution), (string) $application->appeal_deadline);
+        if ($this->settleIfNothingDue($invoice, $institution)) {
+            return DB::table('invoices')->where('crm_id', $invoice->crm_id)->first();
+        }
+
+        return $invoice;
     }
 
     /** Appeal upheld: the decline stands (status Declined). */
@@ -489,13 +617,15 @@ class ApplicationFeeService
     /**
      * Expire applications whose deadline passed: unpaid admin fee, unpaid appeal fee (the original
      * decline stands). An unanswered change request becomes Pending Admin Confirm Expiry instead.
+     * Finally, Designated institutions whose designation lapsed without an approved renewal are
+     * De-Designated (after the admin-fee expiry, so an unpaid approval no longer carries them).
      *
-     * @return array{admin_fee: int, changes: int, appeal: int}
+     * @return array{admin_fee: int, changes: int, appeal: int, lapsed: int}
      */
     public function enforceDeadlines(): array
     {
         $today = $this->today();
-        $counts = ['admin_fee' => 0, 'changes' => 0, 'appeal' => 0];
+        $counts = ['admin_fee' => 0, 'changes' => 0, 'appeal' => 0, 'lapsed' => 0];
 
         foreach ([['admin_fee', self::FEE_ADMIN_VARIABLE], ['appeal_payment', self::FEE_APPEAL]] as [$stage, $feeType]) {
             $overdue = DB::table('applications as a')
@@ -525,6 +655,8 @@ class ApplicationFeeService
             ->where('changes_due_date', '<', $today)
             ->update(['workflow_stage' => 'pending_expiry', 'status' => self::STATUS_PENDING_EXPIRY]);
 
+        $counts['lapsed'] = $this->designation->deDesignateLapsed();
+
         return $counts;
     }
 
@@ -539,18 +671,25 @@ class ApplicationFeeService
         $this->designation->onApplicationApproved($application, $approvedDate, $application->designation_expiry);
 
         $institution = $this->institution($application);
-        if ($institution !== null) {
-            $this->notifier->applicationDecision(true, $institution, (string) $application->reference, $approvedDate, [
+        if ($institution !== null && ! $this->decidedOnAppeal($application)) {
+            $this->notifier->applicationApproved($institution, (string) $application->reference, $approvedDate, [
                 'designation_expiry' => (string) ($application->designation_expiry ?? ''),
             ]);
         }
+    }
+
+    /** Approved after an overturned appeal: the ADM sends the decision as a formal letter, so no decision emails. */
+    private function decidedOnAppeal(object $application): bool
+    {
+        return ($application->appeal_decision ?? null) === 'Overturned';
     }
 
     /** Email the institution its payment receipt. Never lets a mail/PDF problem undo the payment. */
     private function sendReceipt(object $invoice, object $application): void
     {
         $institution = $this->institution($application);
-        if ($institution === null) {
+        // A $0 invoice (no charge / fee exempt) involved no payment, so there is nothing to acknowledge.
+        if ($institution === null || (float) ($invoice->total_charges ?? 0) <= 0) {
             return;
         }
 
