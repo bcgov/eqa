@@ -32,7 +32,7 @@ class MaintenanceUtilsTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->component('Admin/MaintenanceUtils')
-                ->where('categories', ['Ministry', 'Fees', 'Deadlines'])
+                ->where('categories', ['Ministry', 'Fees', 'Deadlines', 'Application Help Text'])
                 ->where('results.Fees.0.field_key', 'fee_application_new'));
     }
 

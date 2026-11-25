@@ -151,7 +151,9 @@ class ApplicationFeeService
         $locations = $institution !== null
             ? DB::table('campuses')->where('institution_crm_id', $institution->crm_id)->where('status', 'Active')->count()
             : 0;
-        $permit = (int) ($application->intl_students_permit ?? 0);
+        // Per Student Fee Payment Enrollment (study permit students over the preceding calendar year); applications
+        // from before that question fall back to the enrolment section's International Students - Study Permit.
+        $permit = (int) ($application->per_student_fee_enrolment ?? $application->intl_students_permit ?? 0);
         $locationText = $locations.' active location'.($locations === 1 ? '' : 's');
 
         $lines = [];

@@ -19,6 +19,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
+use Modules\Admin\Models\Institution;
 use Modules\Admin\Services\ApplicationFeeService;
 use Modules\Admin\Services\BceidService;
 use Modules\Admin\Services\DesignationService;
@@ -68,6 +69,9 @@ class InstitutionController extends Controller
                 ? DB::table('sent_emails')->where('institution_crm_id', $crmId)->orderByDesc('sent_at')->orderByDesc('id')->get()
                 : collect(),
             'bceidLookup' => session($this->bceidLookupKey($crmId)),
+            'previousOperatingNames' => Schema::hasTable('previous_operating_names')
+                ? Institution::find($crmId)?->previousOperatingNames()->with('application:crm_id,reference')->get() ?? collect()
+                : collect(),
         ]);
     }
 
@@ -122,7 +126,6 @@ class InstitutionController extends Controller
                 'Ministers consent under the Degree Authorization Act (DAA)',
                 'Languages Canada Accreditation',
             ],
-            'enrolmentTypes' => ['FTE', 'Enrolment'],
             'canEditDli' => true,
             'submitUrl' => "/admin/institutions/{$crmId}",
             'cancelUrl' => "/admin/institutions/{$crmId}",
@@ -149,10 +152,10 @@ class InstitutionController extends Controller
             'country' => ['nullable', 'string', 'max:100'],
             'total_enrolment' => ['nullable', 'integer', 'min:0'],
             'intl_students_permit' => ['nullable', 'integer', 'min:0'],
-            'intl_students_other' => ['nullable', 'integer', 'min:0'],
+            // intl_students_other is retired (no longer relevant to the Act): not asked, never written.
             'in_person_students' => ['nullable', 'integer', 'min:0'],
             'online_students' => ['nullable', 'integer', 'min:0'],
-            'enrolment_type' => ['nullable', 'string', 'max:50'],
+            // enrolment_type is retired too (Total Institution Enrolment's help says FTE or headcount).
         ]);
 
         DB::table('institutions')->where('crm_id', $crmId)->update($data);

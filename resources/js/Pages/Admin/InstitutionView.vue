@@ -10,6 +10,7 @@ const props = defineProps({
     dbas: { type: Array, default: () => [] },
     sentEmails: { type: Array, default: () => [] },
     bceidLookup: { type: Object, default: null },
+    previousOperatingNames: { type: Array, default: () => [] },
     designationOptions: { type: Object, default: () => ({ statuses: [], standings: [], ptibRequired: false, ptibQaMetThrough: '' }) },
 })
 
@@ -341,7 +342,6 @@ function removeDba(d) {
             <dl class="divide-y divide-slate-100 text-sm">
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Total Enrolment</dt><dd class="text-slate-800">{{ institution?.total_enrolment ?? '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Intl - Study Permit</dt><dd class="text-slate-800">{{ institution?.intl_students_permit ?? '—' }}</dd></div>
-                <div class="flex justify-between py-2"><dt class="text-slate-500">Intl - Other</dt><dd class="text-slate-800">{{ institution?.intl_students_other ?? '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">In-Person</dt><dd class="text-slate-800">{{ institution?.in_person_students ?? '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Online</dt><dd class="text-slate-800">{{ institution?.online_students ?? '—' }}</dd></div>
             </dl>
@@ -601,6 +601,34 @@ function removeDba(d) {
                     </td>
                 </tr>
                 <tr v-if="filteredDbas.length === 0"><td colspan="5" class="px-3 py-6 text-center text-sm text-slate-400">No DBAs recorded.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="mt-8 flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-slate-800">Previous Operating Names <span class="text-sm font-normal text-slate-500">({{ previousOperatingNames.length }})</span></h2>
+    </div>
+    <div class="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+        <table class="min-w-full divide-y divide-slate-200 text-sm">
+            <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr>
+                    <th class="px-3 py-2.5">Name</th>
+                    <th class="px-3 py-2.5">Used From</th>
+                    <th class="px-3 py-2.5">Used To</th>
+                    <th class="px-3 py-2.5">Declared On</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                <tr v-for="n in previousOperatingNames" :key="n.id" class="hover:bg-slate-50">
+                    <td class="px-3 py-2 font-medium text-slate-800">{{ n.name }}</td>
+                    <td class="px-3 py-2 text-slate-600">{{ n.used_from }}</td>
+                    <td class="px-3 py-2 text-slate-600">{{ n.used_to || 'Present' }}</td>
+                    <td class="px-3 py-2">
+                        <Link v-if="n.application" :href="`/admin/applications/${n.application.crm_id}`" class="font-mono text-xs text-indigo-600 hover:underline">{{ n.application.reference }}</Link>
+                        <span v-else class="text-slate-400">—</span>
+                    </td>
+                </tr>
+                <tr v-if="previousOperatingNames.length === 0"><td colspan="4" class="px-3 py-6 text-center text-sm text-slate-400">No previous operating names declared.</td></tr>
             </tbody>
         </table>
     </div>

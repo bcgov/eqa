@@ -69,7 +69,6 @@ const showPtiruStanding = computed(() => {
                 <dl class="divide-y divide-slate-100 text-sm">
                     <div class="flex justify-between py-2"><dt class="text-slate-500">Total Institution Enrolment</dt><dd class="text-slate-800">{{ institution.total_enrolment ?? '—' }}</dd></div>
                     <div class="flex justify-between py-2"><dt class="text-slate-500">International Students - Study Permit</dt><dd class="text-slate-800">{{ institution.intl_students_permit ?? '—' }}</dd></div>
-                    <div class="flex justify-between py-2"><dt class="text-slate-500">International Students - Other</dt><dd class="text-slate-800">{{ institution.intl_students_other ?? '—' }}</dd></div>
                     <div class="flex justify-between py-2"><dt class="text-slate-500">Total Number of In-Person Students</dt><dd class="text-slate-800">{{ institution.in_person_students ?? '—' }}</dd></div>
                 </dl>
             </div>

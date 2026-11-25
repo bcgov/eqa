@@ -531,7 +531,23 @@ class RedBoxWorkflowTest extends TestCase
             'affirm_understands_comply' => true,
             'affirm_authorized' => true,
             'representative_signature' => 'Pat Contact',
+            'service_street1' => '100 Main Street',
+            'service_city' => 'Victoria',
+            'service_province' => 'BC',
+            'service_postal_code' => 'V8W 1A1',
+            'service_country' => 'Canada',
+            'service_address_confirmed' => true,
+            'campus_locations' => [['location_name' => 'Main Campus', 'street1' => '100 Main Street', 'city' => 'Victoria', 'province' => 'BC', 'postal_code' => 'V8W 1A1', 'primary_location' => true]],
+            'website_compliance' => $this->websiteComplianceAnswers(),
+            'per_student_fee_enrolment' => 0,
         ], $overrides);
+    }
+
+    /** @return array<int, array{url: string}> a link for every active Website Compliance item */
+    private function websiteComplianceAnswers(): array
+    {
+        return DB::table('website_compliance_items')->where('is_active', true)->pluck('id')
+            ->mapWithKeys(fn ($id): array => [$id => ['url' => 'https://process.example/info/'.$id]])->all();
     }
 
     private function application(string $id): object

@@ -2,6 +2,8 @@
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3'
 import { ref, computed, watch } from 'vue'
 import ManualPaymentForm from '../../Components/ManualPaymentForm.vue'
+import ApplicationLocationsSummary from '../../Components/ApplicationLocationsSummary.vue'
+import WebsiteComplianceSummary from '../../Components/WebsiteComplianceSummary.vue'
 
 const props = defineProps({
     application: { type: Object, default: () => ({}) },
@@ -10,6 +12,9 @@ const props = defineProps({
     adminFeeQuote: { type: Object, default: () => ({ amount: 0, description: '' }) },
     qaMetThrough: { type: String, default: null },
     defaultChangesDueDate: { type: String, default: '' },
+    campusLocations: { type: Array, default: () => [] },
+    previousNames: { type: Array, default: () => [] },
+    websiteCompliance: { type: Array, default: () => [] },
 })
 
 const page = usePage()
@@ -122,8 +127,6 @@ const form = useForm({
     affirm_policy_manual: truthy(a.affirm_policy_manual),
     affirm_website_compliance: truthy(a.affirm_website_compliance),
     affirm_written_permission: truthy(a.affirm_written_permission),
-    affirm_branding_guide: truthy(a.affirm_branding_guide),
-    affirm_understands_comply: truthy(a.affirm_understands_comply),
     affirm_authorized: truthy(a.affirm_authorized),
     representative_signature: a.representative_signature ?? '',
 })
@@ -455,6 +458,11 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
             </div>
         </div>
 
+        <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="mb-3 text-sm font-semibold text-slate-700">Locations, Address for Service and Previous Names</h2>
+            <ApplicationLocationsSummary :application="application" :campus-locations="campusLocations" :previous-names="previousNames" />
+        </div>
+
         <div class="grid gap-6 lg:grid-cols-2">
             <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <h2 class="mb-3 text-sm font-semibold text-slate-700">Financials</h2>
@@ -462,6 +470,7 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
                     <div class="flex justify-between py-2"><dt class="text-slate-500">Application Fee</dt><dd class="text-slate-800">{{ money(applicationFeeInvoice ? applicationFeeInvoice.total_charges : application.application_fee) }}</dd></div>
                     <div class="flex justify-between py-2"><dt class="text-slate-500">Total Amount</dt><dd class="font-medium text-slate-800">{{ money(invoicedTotal) }}</dd></div>
                     <div class="flex justify-between py-2"><dt class="text-slate-500">Invoice Number</dt><dd class="text-slate-800">{{ applicationFeeInvoice?.invoice_number || application.invoice_number || '—' }}</dd></div>
+                    <div class="flex justify-between py-2"><dt class="text-slate-500">Per Student Fee Payment Enrollment</dt><dd class="text-slate-800">{{ application.per_student_fee_enrolment ?? '—' }}</dd></div>
                 </dl>
             </div>
 
@@ -478,6 +487,13 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
                     <label class="flex items-center gap-2"><input type="checkbox" v-model="form.program_trades_apprenticeship" :disabled="locked" class="rounded"> Trades / Apprenticeship Training</label>
                 </div>
             </div>
+        </div>
+
+        <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="mb-3 text-sm font-semibold text-slate-700">Collaborations and Partnerships</h2>
+            <label class="block text-sm"><span class="text-slate-500">Affiliates or Partnership Institutions</span>
+                <textarea v-model="form.affiliates_partners" rows="2" :disabled="locked" :class="inputClass"></textarea>
+            </label>
         </div>
 
         <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
@@ -501,21 +517,21 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
                     <label class="block"><span class="text-slate-500">Other Logos or Symbols and Trademarks</span>
                         <textarea v-model="form.other_logos_trademarks" rows="2" :disabled="locked" :class="inputClass"></textarea>
                     </label>
-                    <label class="block"><span class="text-slate-500">Affiliates or Partnership Institutions</span>
-                        <textarea v-model="form.affiliates_partners" rows="2" :disabled="locked" :class="inputClass"></textarea>
-                    </label>
                 </div>
             </div>
         </div>
 
         <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="mb-3 text-sm font-semibold text-slate-700">Website Compliance</h2>
+            <WebsiteComplianceSummary :sections="websiteCompliance" />
+        </div>
+
+        <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <h2 class="mb-3 text-sm font-semibold text-slate-700">Affirmations</h2>
             <div class="space-y-2 text-sm text-slate-700">
-                <label class="flex items-start gap-2"><input type="checkbox" v-model="form.affirm_policy_manual" :disabled="locked" class="mt-0.5 rounded"> Confirm reading the EQA Policy and Procedures Manual</label>
-                <label class="flex items-start gap-2"><input type="checkbox" v-model="form.affirm_website_compliance" :disabled="locked" class="mt-0.5 rounded"> Institution's website is in compliance</label>
-                <label class="flex items-start gap-2"><input type="checkbox" v-model="form.affirm_written_permission" :disabled="locked" class="mt-0.5 rounded"> Institutions require the written permission of the Ministry to use the EQA brand</label>
-                <label class="flex items-start gap-2"><input type="checkbox" v-model="form.affirm_branding_guide" :disabled="locked" class="mt-0.5 rounded"> Use and misuse of the EQA brand are set out in the Education Quality Assurance branding guide</label>
-                <label class="flex items-start gap-2"><input type="checkbox" v-model="form.affirm_understands_comply" :disabled="locked" class="mt-0.5 rounded"> The institutional representative understands what use of the EQA brand entails, and agrees to comply</label>
+                <label class="flex items-start gap-2"><input type="checkbox" v-model="form.affirm_policy_manual" :disabled="locked" class="mt-0.5 rounded"> Read and understood the <em>Post-Secondary International Education (Designated Institutions) Act</em>, Regulations and Administrator’s Rules</label>
+                <label class="flex items-start gap-2"><input type="checkbox" v-model="form.affirm_website_compliance" :disabled="locked" class="mt-0.5 rounded"> Institution's website is in compliance with the Act, Regulations and Administrator’s Rules</label>
+                <label class="flex items-start gap-2"><input type="checkbox" v-model="form.affirm_written_permission" :disabled="locked" class="mt-0.5 rounded"> Institutions require the written permission of the Ministry to use the designation mark</label>
                 <label class="flex items-start gap-2"><input type="checkbox" v-model="form.affirm_authorized" :disabled="locked" class="mt-0.5 rounded"> I am the person assigned by my organization, authorized to submit the application</label>
             </div>
             <label class="mt-3 block text-sm sm:max-w-sm"><span class="text-slate-500">Institution Representative Signature</span>

@@ -13,6 +13,8 @@ use Inertia\Inertia;
 use Inertia\Response;
 use Modules\Admin\Models\Application;
 use Modules\Admin\Services\ApplicationFeeService;
+use Modules\Admin\Services\ApplicationProfileService;
+use Modules\Admin\Services\WebsiteComplianceService;
 
 /**
  * Ministry (IDIR) view over migrated EQA designation applications: a paginated,
@@ -83,6 +85,9 @@ class ApplicationController extends Controller
             'adminFeeQuote' => app(ApplicationFeeService::class)->adminFeeQuote(DB::table('applications')->where('crm_id', $crmId)->first()),
             'defaultChangesDueDate' => app(ApplicationFeeService::class)->defaultChangesDueDate(),
             'qaMetThrough' => $qaMetThrough,
+            'campusLocations' => app(ApplicationProfileService::class)->campusLocations($crmId),
+            'previousNames' => app(ApplicationProfileService::class)->previousNames($crmId),
+            'websiteCompliance' => app(WebsiteComplianceService::class)->copy($crmId),
         ]);
     }
 }

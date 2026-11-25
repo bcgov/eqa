@@ -21,7 +21,7 @@ use Inertia\Response;
  */
 class MaintenanceController extends Controller
 {
-    private const CATEGORY_ORDER = ['Ministry', 'Fees', 'Deadlines'];
+    private const CATEGORY_ORDER = ['Ministry', 'Fees', 'Deadlines', 'Application Help Text'];
 
     private const INVOICE_CATEGORY = 'Invoice';
 

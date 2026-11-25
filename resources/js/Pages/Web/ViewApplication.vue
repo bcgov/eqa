@@ -1,6 +1,9 @@
 <script setup>
 import { Head, Link, router, usePage } from '@inertiajs/vue3'
 import { computed, ref } from 'vue'
+import { affirmations as affirmationLabels } from '../../applicationAffirmations'
+import ApplicationLocationsSummary from '../../Components/ApplicationLocationsSummary.vue'
+import WebsiteComplianceSummary from '../../Components/WebsiteComplianceSummary.vue'
 
 const props = defineProps({
     institution: { type: Object, default: null },
@@ -10,6 +13,9 @@ const props = defineProps({
     canEdit: { type: Boolean, default: false },
     canAppeal: { type: Boolean, default: false },
     awaitingSubmission: { type: Boolean, default: false },
+    campusLocations: { type: Array, default: () => [] },
+    previousNames: { type: Array, default: () => [] },
+    websiteCompliance: { type: Array, default: () => [] },
 })
 
 const flash = computed(() => usePage().props.flash || {})
@@ -63,15 +69,10 @@ const mediaPlacements = computed(() => [
     ['Billboard/Signage', props.application.media_billboard],
 ])
 
-// Conditions of use affirmations — full legacy label text.
-const affirmations = computed(() => [
-    ['I confirm that I have read and understood the EQA Policy and Procedures Manual.', props.application.affirm_policy_manual],
-    ["I confirm that my institution's website is in compliance with the EQA Policy and Procedures Manual and that all policies listed in the Manual are readily available to the public on the website.", props.application.affirm_website_compliance],
-    ['Institutions require the written permission of the Ministry in order to use the EQA brand. Permission to use the brand will be provided to institutions that have provided the necessary institutional profile information and that have been approved for application or re-application of their EQA designation.', props.application.affirm_written_permission],
-    ['Information relating to use and misuse of the EQA brand are set out in the Education Quality Assurance Policy and Procedures Manual and EQA Branding Guide (available through the system). Any Questions relating to the use of the EQA brand should be directed to EQA@gov.bc.ca', props.application.affirm_branding_guide],
-    ['The institutional representative understands what use of the EQA brand entails, and agrees to comply with all EQA brand use requirements.', props.application.affirm_understands_comply],
-    ['I am the person assigned by my organization as the institutional contact, authorized to submit the application.', props.application.affirm_authorized],
-])
+// Conditions of use affirmations (same wording as the form).
+const affirmations = computed(() => affirmationLabels.map(([field, parts]) => [field, parts, props.application[field]]))
+// "?" bubble text, maintained under Maintenance > Utils (Application Help Text).
+const help = computed(() => usePage().props.settings?.help ?? {})
 </script>
 
 <template>
@@ -169,30 +170,28 @@ const affirmations = computed(() => [
             <h2 class="mb-3 border-b border-slate-100 pb-2 text-base font-semibold text-slate-700">Student Enrolment Information</h2>
             <dl class="grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
                 <div class="flex justify-between border-b border-slate-50 py-1">
-                    <dt class="text-slate-500" title="Total Institution Enrolment includes all students (domestic and international) in all programs at the institution over the past 12 months.">Total Institution Enrolment</dt>
+                    <dt class="text-slate-500" :title="help.total_enrolment">Total Institution Enrolment</dt>
                     <dd class="text-slate-800">{{ application.total_enrolment ?? '—' }}</dd>
                 </div>
                 <div class="flex justify-between border-b border-slate-50 py-1">
-                    <dt class="text-slate-500">Enrolment Type</dt>
-                    <dd class="text-slate-800">{{ dash(application.enrolment_type) }}</dd>
-                </div>
-                <div class="flex justify-between border-b border-slate-50 py-1">
-                    <dt class="text-slate-500">Number of International Students - Study Permit</dt>
+                    <dt class="text-slate-500" :title="help.intl_students_permit">Number of International Students - Study Permit</dt>
                     <dd class="text-slate-800">{{ application.intl_students_permit ?? '—' }}</dd>
                 </div>
                 <div class="flex justify-between border-b border-slate-50 py-1">
-                    <dt class="text-slate-500">Number of International Students - Other</dt>
-                    <dd class="text-slate-800">{{ application.intl_students_other ?? '—' }}</dd>
-                </div>
-                <div class="flex justify-between border-b border-slate-50 py-1">
-                    <dt class="text-slate-500" title="Include the number of students enrolled in a program where either 100% of the hours of instruction are delivered in-person or a combination of in-person and online delivery.">Total Number of In-Person Students</dt>
+                    <dt class="text-slate-500" :title="help.in_person_students">Total Number of In-Person Students</dt>
                     <dd class="text-slate-800">{{ application.in_person_students ?? '—' }}</dd>
                 </div>
                 <div class="flex justify-between border-b border-slate-50 py-1">
-                    <dt class="text-slate-500">Total Number of Online Students</dt>
+                    <dt class="text-slate-500" :title="help.online_students">Total Number of Online Students</dt>
                     <dd class="text-slate-800">{{ application.online_students ?? '—' }}</dd>
                 </div>
             </dl>
+        </section>
+
+        <!-- Locations, Address for Service and Previous Names -->
+        <section class="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="mb-3 border-b border-slate-100 pb-2 text-base font-semibold text-slate-700">Locations, Address for Service and Previous Names</h2>
+            <ApplicationLocationsSummary :application="application" :campus-locations="campusLocations" :previous-names="previousNames" />
         </section>
 
         <!-- Type of Education Offered -->
@@ -218,6 +217,14 @@ const affirmations = computed(() => [
             <p class="text-sm font-semibold text-slate-700">Yes</p>
         </section>
 
+        <!-- Collaborations and Partnerships -->
+        <section class="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="mb-3 border-b border-slate-100 pb-2 text-base font-semibold text-slate-700">Collaborations and Partnerships</h2>
+            <p class="text-sm font-medium text-slate-500">Affiliates or Partnership Institutions:</p>
+            <p class="text-xs italic text-slate-400">List any official affiliations or partnerships the institution has with other institutions.</p>
+            <p class="mt-1 whitespace-pre-line rounded border border-slate-100 bg-slate-50 p-3 text-sm text-slate-800">{{ dash(application.affiliates_partners) }}</p>
+        </section>
+
         <!-- EQA Brand Usage Plan -->
         <section class="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <h2 class="mb-3 border-b border-slate-100 pb-2 text-base font-semibold text-slate-700">EQA Brand Usage Plan</h2>
@@ -236,16 +243,16 @@ const affirmations = computed(() => [
             </div>
 
             <div class="mt-4">
-                <p class="text-sm font-medium text-slate-500">Affiliates or Partnership Institutions:</p>
-                <p class="text-xs italic text-slate-400">List any official affiliations or partnerships the institution has with other institutions.</p>
-                <p class="mt-1 whitespace-pre-line rounded border border-slate-100 bg-slate-50 p-3 text-sm text-slate-800">{{ dash(application.affiliates_partners) }}</p>
-            </div>
-
-            <div class="mt-4">
                 <p class="text-sm font-medium text-slate-500">Other Logos or Symbols and Trademarks</p>
                 <p class="text-xs italic text-slate-400">List any other marks, logos, or symbols that may appear in conjunction with the EQA Brand.</p>
                 <p class="mt-1 whitespace-pre-line rounded border border-slate-100 bg-slate-50 p-3 text-sm text-slate-800">{{ dash(application.other_logos_trademarks) }}</p>
             </div>
+        </section>
+
+        <!-- Website Compliance -->
+        <section class="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="mb-3 border-b border-slate-100 pb-2 text-base font-semibold text-slate-700">Website Compliance</h2>
+            <WebsiteComplianceSummary :sections="websiteCompliance" />
         </section>
 
         <!-- Financials -->
@@ -267,13 +274,19 @@ const affirmations = computed(() => [
             </dl>
         </section>
 
+        <!-- Per Student Fee Payment Enrollment -->
+        <section class="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="mb-3 border-b border-slate-100 pb-2 text-base font-semibold text-slate-700">Per Student Fee Payment Enrollment</h2>
+            <p class="text-sm text-slate-800" :title="help.per_student_fee_enrolment">{{ application.per_student_fee_enrolment ?? '—' }}</p>
+        </section>
+
         <!-- Conditions of use -->
         <section class="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <h2 class="mb-3 border-b border-slate-100 pb-2 text-base font-semibold text-slate-700">I have read and understand the conditions of use pertaining to the following:</h2>
             <ul class="space-y-3 text-sm">
-                <li v-for="[label, checked] in affirmations" :key="label" class="flex items-start gap-2">
-                    <input type="checkbox" :checked="!!checked" disabled class="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600" />
-                    <span class="text-slate-700">{{ label }}</span>
+                <li v-for="[field, parts, checked] in affirmations" :key="field" class="flex items-start gap-2">
+                    <input type="checkbox" :checked="[true, 1, '1', 't'].includes(checked)" disabled class="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600" />
+                    <span class="text-slate-700"><template v-for="([text, italic], k) in parts" :key="k"><em v-if="italic">{{ text }}</em><template v-else>{{ text }}</template></template></span>
                 </li>
             </ul>
 

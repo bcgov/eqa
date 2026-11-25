@@ -7,6 +7,7 @@ namespace Modules\Admin\Models;
 use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
@@ -77,6 +78,9 @@ class Application extends Model
         'affirm_branding_guide' => 'boolean',
         'affirm_understands_comply' => 'boolean',
         'affirm_authorized' => 'boolean',
+        'service_address_confirmed' => 'boolean',
+        'per_student_fee_enrolment' => 'integer',
+        'annual_report_filed' => 'boolean',
         'application_fee' => 'decimal:2',
         'annual_designation_fee' => 'decimal:2',
     ];
@@ -89,6 +93,21 @@ class Application extends Model
     public function invoice(): HasOne
     {
         return $this->hasOne(Invoice::class, 'application_crm_id', 'crm_id');
+    }
+
+    public function previousOperatingNames(): HasMany
+    {
+        return $this->hasMany(PreviousOperatingName::class, 'application_crm_id', 'crm_id')->orderByDesc('used_from');
+    }
+
+    public function campusLocations(): HasMany
+    {
+        return $this->hasMany(ApplicationCampusLocation::class, 'application_crm_id', 'crm_id')->orderBy('sort_order');
+    }
+
+    public function webCompliances(): HasMany
+    {
+        return $this->hasMany(ApplicationWebCompliance::class, 'application_crm_id', 'crm_id')->orderBy('section_order')->orderBy('item_order');
     }
 
     // Migrated projection stores plain dates; keep them as Y-m-d when serialized.

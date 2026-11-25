@@ -43,7 +43,6 @@ class ProcessNotifier
             'country' => 'Country',
             'postal_code' => 'Postal Code',
             'total_enrolment' => 'Student Enrolment Size',
-            'enrolment_type' => 'Enrolment Type',
         ]);
 
         if ($changes === '') {

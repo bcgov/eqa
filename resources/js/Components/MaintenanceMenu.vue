@@ -7,6 +7,7 @@ const items = [
     { label: 'Utils', href: '/admin/maintenance/utils' },
     { label: 'Email Templates', href: '/admin/maintenance/email-templates' },
     { label: 'Invoice & Receipt', href: '/admin/maintenance/invoice' },
+    { label: 'Website Compliance', href: '/admin/maintenance/website-compliance' },
 ]
 const url = computed(() => (usePage().url || '').split('?')[0])
 const isActive = (href) => url.value === href || url.value.startsWith(`${href}/`)

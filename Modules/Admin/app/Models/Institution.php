@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Modules\Admin\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * A designated (or applicant) institution, migrated from the legacy Dynamics
@@ -34,4 +35,9 @@ class Institution extends Model
         'in_person_students' => 'integer',
         'online_students' => 'integer',
     ];
+
+    public function previousOperatingNames(): HasMany
+    {
+        return $this->hasMany(PreviousOperatingName::class, 'institution_crm_id', 'crm_id')->orderByDesc('used_from');
+    }
 }

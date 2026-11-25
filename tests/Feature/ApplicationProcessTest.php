@@ -81,7 +81,7 @@ class ApplicationProcessTest extends TestCase
 
     public function test_new_application_from_draft_to_designation(): void
     {
-        $id = $this->startApplication(['intl_students_permit' => 40]);
+        $id = $this->startApplication(['intl_students_permit' => 40, 'per_student_fee_enrolment' => 40]);
 
         $this->assertSame('Draft', $this->application($id)->status);
         $this->assertSame(0, DB::table('invoices')->count(), 'No fee is invoiced while the application is a draft.');
@@ -284,7 +284,7 @@ class ApplicationProcessTest extends TestCase
             'designation_expiry' => Carbon::now()->addMonth()->toDateString(),
         ]);
 
-        $id = $this->submittedApplication(['intl_students_permit' => 20]);
+        $id = $this->submittedApplication(['intl_students_permit' => 20, 'per_student_fee_enrolment' => 20]);
 
         $fee = $this->invoice($id, ApplicationFeeService::FEE_APPLICATION_RENEWAL);
         $this->assertNotNull($fee);
@@ -393,12 +393,280 @@ class ApplicationProcessTest extends TestCase
         $this->assertNotSame('Designated', $this->institution()->eqa_status);
     }
 
+    // Locations, address for service and previous operating names -----------------------
+
+    public function test_application_records_address_for_service_and_previous_operating_names(): void
+    {
+        $id = $this->startApplication(['annual_report_filed' => true, 'previous_names' => [
+            ['name' => 'Process Academy', 'used_from' => $this->vancouverDate(-900), 'used_to' => $this->vancouverDate(-30)],
+            ['name' => 'Process Institute', 'used_from' => $this->vancouverDate(-400), 'used_to' => ''],
+        ]]);
+
+        $application = $this->application($id);
+        $this->assertSame('100 Main Street', $application->service_street1);
+        $this->assertEquals(1, $application->service_address_confirmed);
+        $this->assertEquals(1, $application->annual_report_filed);
+        $this->assertSame(2, \Modules\Admin\Models\Application::find($id)->previousOperatingNames()->count());
+        $this->assertSame(['Process Institute', 'Process Academy'], \Modules\Admin\Models\Institution::find(self::INSTITUTION)->previousOperatingNames->pluck('name')->all());
+        $this->assertNull(DB::table('previous_operating_names')->where('name', 'Process Institute')->value('used_to'));
+
+        // Editing the draft replaces the names declared on it.
+        $this->asInstitution()->put("/web/applications/{$id}", $this->applicationForm([
+            'previous_names' => [['name' => 'Process Academy', 'used_from' => $this->vancouverDate(-900), 'used_to' => $this->vancouverDate(-30)]],
+        ]))->assertSessionHas('success');
+        $this->assertSame(['Process Academy'], DB::table('previous_operating_names')->where('application_crm_id', $id)->pluck('name')->all());
+        $this->assertEquals(0, $this->application($id)->annual_report_filed, 'Unticked: not filed.');
+    }
+
+    public function test_address_for_service_must_be_confirmed_and_names_must_be_from_the_last_five_years(): void
+    {
+        $this->asInstitution()->post('/web/applications', $this->applicationForm([
+            'intent' => 'submit',
+            'service_address_confirmed' => false,
+            'service_city' => '',
+            'previous_names' => [
+                ['name' => 'Old College', 'used_from' => $this->vancouverDate(-3000), 'used_to' => $this->vancouverDate(-2000)],
+                ['name' => 'Backwards College', 'used_from' => $this->vancouverDate(-100), 'used_to' => $this->vancouverDate(-200)],
+            ],
+        ]))->assertSessionHasErrors(['service_address_confirmed', 'service_city', 'previous_names.0', 'previous_names.1.used_to']);
+
+        $this->assertSame(0, DB::table('applications')->count());
+        $this->assertSame(0, DB::table('previous_operating_names')->count());
+    }
+
+    public function test_new_application_does_not_prefill_institution_campuses_but_prefills_recent_previous_names(): void
+    {
+        DB::table('campuses')->insert([
+            ['crm_id' => (string) Str::uuid(), 'institution_crm_id' => self::INSTITUTION, 'name' => 'Downtown', 'street1' => '1 Main St', 'city' => 'Victoria', 'status' => 'Active'],
+        ]);
+        DB::table('previous_operating_names')->insert([
+            ['institution_crm_id' => self::INSTITUTION, 'name' => 'Recent Name', 'used_from' => $this->vancouverDate(-700), 'used_to' => $this->vancouverDate(-10)],
+            ['institution_crm_id' => self::INSTITUTION, 'name' => 'Ancient Name', 'used_from' => $this->vancouverDate(-4000), 'used_to' => $this->vancouverDate(-3000)],
+        ]);
+        $version = (string) app(\App\Http\Middleware\HandleInertiaRequests::class)->version(request());
+
+        $this->asInstitution()->withHeaders(['X-Inertia' => 'true', 'X-Inertia-Version' => $version])
+            ->get('/web/applications/new')
+            ->assertOk()
+            ->assertJsonMissingPath('props.campusLocations')
+            ->assertJsonMissingPath('props.campuses')
+            ->assertJsonPath('props.previousNames', [['name' => 'Recent Name', 'used_from' => $this->vancouverDate(-700), 'used_to' => $this->vancouverDate(-10)]]);
+    }
+
+    public function test_application_campus_locations_are_its_own_and_leave_institution_campuses_alone(): void
+    {
+        DB::table('campuses')->insert(['crm_id' => (string) Str::uuid(), 'institution_crm_id' => self::INSTITUTION, 'name' => 'Downtown', 'street1' => '1 Main St', 'city' => 'Victoria', 'status' => 'Active']);
+
+        $id = $this->startApplication(['campus_locations' => [
+            ['location_name' => 'Harbour Campus', 'street1' => '5 Wharf St', 'city' => 'Victoria', 'province' => 'BC', 'postal_code' => 'V8W 1T3', 'email' => 'harbour@process.example', 'primary_location' => true],
+            ['location_name' => 'Online Hub', 'street1' => '9 Cloud Ave', 'city' => 'Kelowna', 'province' => 'BC', 'postal_code' => 'V1Y 1A1', 'primary_location' => false],
+        ]]);
+
+        $locations = \Modules\Admin\Models\Application::find($id)->campusLocations;
+        $this->assertSame(['Harbour Campus', 'Online Hub'], $locations->pluck('location_name')->all());
+        $this->assertTrue($locations[0]->primary_location);
+        $this->assertSame(1, DB::table('campuses')->where('institution_crm_id', self::INSTITUTION)->count(), 'Institution campuses are untouched.');
+        $this->assertSame('Downtown', DB::table('campuses')->where('institution_crm_id', self::INSTITUTION)->value('name'));
+
+        $this->viewApplication($id)->assertJsonPath('props.campusLocations.1.location_name', 'Online Hub')->assertJsonMissingPath('props.campusLocations.0.status');
+    }
+
+    public function test_campus_locations_are_required_with_at_most_one_primary(): void
+    {
+        $this->asInstitution()->post('/web/applications', $this->applicationForm(['intent' => 'submit', 'campus_locations' => []]))
+            ->assertSessionHasErrors(['campus_locations' => 'Add at least one campus location.']);
+
+        $this->asInstitution()->post('/web/applications', $this->applicationForm(['campus_locations' => [
+            ['location_name' => 'A', 'street1' => '1 St', 'city' => 'Victoria', 'province' => 'BC', 'postal_code' => 'V8W 1A1', 'primary_location' => true],
+            ['location_name' => '', 'street1' => '', 'city' => 'Victoria', 'province' => 'BC', 'postal_code' => 'V8W 1A1', 'primary_location' => true],
+        ]]))->assertSessionHasErrors(['campus_locations', 'campus_locations.1.location_name', 'campus_locations.1.street1']);
+
+        $this->assertSame(0, DB::table('applications')->count());
+        $this->assertSame(0, DB::table('application_campus_locations')->count());
+    }
+
+    // Steps: save a draft at any point, submit when complete ---------------------------------
+
+    public function test_a_partly_completed_draft_can_be_saved_and_returns_to_the_same_step(): void
+    {
+        $this->asInstitution()->post('/web/applications', ['total_enrolment' => 80, 'step' => 2, 'intent' => 'save'])
+            ->assertSessionHas('success');
+
+        $application = DB::table('applications')->where('institution_crm_id', self::INSTITUTION)->first();
+        $this->assertSame('draft', $application->workflow_stage);
+        $this->assertEquals(80, $application->total_enrolment);
+        $this->assertNull($application->per_student_fee_enrolment);
+        $this->assertSame(0, DB::table('invoices')->count());
+
+        $this->asInstitution()->put("/web/applications/{$application->crm_id}", ['total_enrolment' => 90, 'step' => 5])
+            ->assertRedirect("/web/applications/{$application->crm_id}/edit?step=5");
+        $this->assertEquals(90, $this->application($application->crm_id)->total_enrolment);
+
+        // Even a draft must enter well-formed values.
+        $this->asInstitution()->put("/web/applications/{$application->crm_id}", ['website_compliance' => [
+            DB::table('website_compliance_items')->value('id') => ['url' => 'not a link'],
+        ]])->assertSessionHasErrors();
+    }
+
+    public function test_incomplete_draft_cannot_be_submitted(): void
+    {
+        $this->asInstitution()->post('/web/applications', ['total_enrolment' => 80]);
+        $id = (string) DB::table('applications')->value('crm_id');
+
+        $this->asInstitution()->post("/web/applications/{$id}/submit")
+            ->assertRedirect("/web/applications/{$id}/edit")
+            ->assertSessionHas('error')
+            ->assertSessionHasErrors(['campus_locations', 'service_street1', 'per_student_fee_enrolment', 'affirm_authorized', 'representative_signature']);
+
+        $this->assertSame('draft', $this->application($id)->workflow_stage);
+        $this->assertSame(0, DB::table('invoices')->count());
+    }
+
+    public function test_submit_application_on_the_last_step_saves_and_submits(): void
+    {
+        $this->asInstitution()->post('/web/applications', $this->applicationForm(['intent' => 'submit']))
+            ->assertSessionHas('success');
+
+        $application = DB::table('applications')->where('institution_crm_id', self::INSTITUTION)->first();
+        $this->assertSame('fee_required', $application->workflow_stage);
+        $this->assertNotNull($this->invoice($application->crm_id, ApplicationFeeService::FEE_APPLICATION_NEW));
+    }
+
+    // Website Compliance -----------------------------------------------------------------
+
+    public function test_website_compliance_needs_a_link_or_a_comment_for_every_item(): void
+    {
+        [$first, $second] = DB::table('website_compliance_items')->orderBy('section_id')->orderBy('sort_order')->limit(2)->pluck('id')->all();
+        $answers = $this->websiteComplianceAnswers();
+        $answers[$first] = ['url' => '', 'comment' => ''];
+        $answers[$second] = ['url' => 'not a web address', 'comment' => ''];
+
+        $this->asInstitution()->post('/web/applications', $this->applicationForm(['intent' => 'submit', 'website_compliance' => $answers]))
+            ->assertSessionHasErrors([
+                "website_compliance.{$first}.url" => 'Enter a link or a comment.',
+                "website_compliance.{$second}.url" => 'Enter a full web address starting with http:// or https://.',
+            ]);
+        $this->assertSame(0, DB::table('applications')->count());
+
+        // A comment alone is enough.
+        $answers[$first] = ['url' => '', 'comment' => 'See the Programs page in the student handbook.'];
+        $answers[$second] = ['url' => 'https://process.example/fees', 'comment' => ''];
+        $this->asInstitution()->post('/web/applications', $this->applicationForm(['website_compliance' => $answers]))->assertSessionHas('success');
+    }
+
+    public function test_submitted_application_keeps_its_copy_of_the_website_compliance_checklist(): void
+    {
+        $items = DB::table('website_compliance_items')->where('is_active', true)->orderBy('sort_order')->get();
+        $id = $this->startApplication();
+        $this->assertSame($items->count(), \Modules\Admin\Models\Application::find($id)->webCompliances()->count());
+        $this->asInstitution()->post("/web/applications/{$id}/submit")->assertSessionHas('success');
+
+        // The admin rewords an item, deactivates another and adds a new one.
+        $reworded = $items[0];
+        $this->asMinistry()->put("/admin/maintenance/website-compliance/items/{$reworded->id}", [
+            'section_id' => $reworded->section_id, 'label' => 'Reworded item', 'help_text' => null, 'applies_to' => 'all', 'is_active' => true,
+        ])->assertSessionHas('success');
+        $this->asMinistry()->put("/admin/maintenance/website-compliance/items/{$items[1]->id}", [
+            'section_id' => $items[1]->section_id, 'label' => $items[1]->label, 'applies_to' => 'all', 'is_active' => false,
+        ])->assertSessionHas('success');
+        $this->asMinistry()->post('/admin/maintenance/website-compliance/items', [
+            'section_id' => $reworded->section_id, 'label' => 'Brand new item', 'applies_to' => 'all', 'is_active' => true,
+        ])->assertSessionHas('success');
+
+        $copy = $this->viewApplication($id)->json('props.websiteCompliance');
+        $labels = collect($copy)->flatMap(fn (array $s): array => $s['items'])->pluck('label');
+        $this->assertSame($items->count(), $labels->count());
+        $this->assertContains($reworded->label, $labels);
+        $this->assertContains($items[1]->label, $labels);
+        $this->assertNotContains('Brand new item', $labels);
+        $this->assertSame('https://process.example/info/'.$reworded->id, $copy[0]['items'][0]['url']);
+
+        // Returned for additional information: still edited against its own copy.
+        DB::table('applications')->where('crm_id', $id)->update(['workflow_stage' => 'changes_requested']);
+        $edit = $this->inertiaGet("/web/applications/{$id}/edit")->json('props.websiteCompliance');
+        $this->assertSame($labels->all(), collect($edit)->flatMap(fn (array $s): array => $s['items'])->pluck('label')->all());
+    }
+
+    public function test_draft_follows_the_current_checklist_and_ptiru_only_items_need_ptiru_qa(): void
+    {
+        $section = DB::table('website_compliance_sections')->orderBy('sort_order')->value('id');
+        $this->asMinistry()->post('/admin/maintenance/website-compliance/items', [
+            'section_id' => $section, 'label' => 'Are programs approved or ANR?', 'applies_to' => 'ptiru', 'is_active' => true,
+        ])->assertSessionHas('success');
+        $labels = fn (): array => collect($this->inertiaGet('/web/applications/new')->json('props.websiteCompliance'))
+            ->flatMap(fn (array $s): array => $s['items'])->pluck('label')->all();
+
+        $this->assertNotContains('Are programs approved or ANR?', $labels());
+
+        DB::table('institutions')->where('crm_id', self::INSTITUTION)->update(['qa_met_through' => DesignationService::PTIRU_QA_MET_THROUGH]);
+        $this->assertContains('Are programs approved or ANR?', $labels());
+    }
+
+    public function test_only_ministry_admins_maintain_the_website_compliance_checklist(): void
+    {
+        $staff = $this->user('wc-user@process.example', Role::MINISTRY_USER, ['idir_user_guid' => 'WCUSER']);
+        $this->actingAs($staff)->withSession(['portal_role' => 'ministry'])->get('/admin/maintenance/website-compliance')->assertForbidden();
+
+        $section = DB::table('website_compliance_sections')->orderBy('sort_order')->value('id');
+        [$first, $second] = DB::table('website_compliance_items')->where('section_id', $section)->orderBy('sort_order')->limit(2)->pluck('id')->all();
+        $this->asMinistry()->post("/admin/maintenance/website-compliance/items/{$second}/move", ['direction' => 'up'])->assertRedirect();
+
+        $this->assertSame([$second, $first], DB::table('website_compliance_items')->where('section_id', $section)->orderBy('sort_order')->limit(2)->pluck('id')->all());
+    }
+
+    // Per Student Fee Payment Enrollment, declarations and help text ---------------------
+
+    public function test_per_student_fee_enrolment_is_required_and_drives_the_international_student_fee(): void
+    {
+        $this->asInstitution()->post('/web/applications', $this->applicationForm(['intent' => 'submit', 'per_student_fee_enrolment' => null]))
+            ->assertSessionHasErrors(['per_student_fee_enrolment' => 'Enter the number of international students for the per student fee.']);
+
+        $id = $this->submittedApplication(['intl_students_permit' => 100, 'per_student_fee_enrolment' => 35]);
+        $this->reviewUntil($id, 'under_review');
+        $this->advance($id, 'eligible', ['eqa_good_standing' => true]);
+        $this->advance($id, 'approve')->assertSessionHas('success');
+
+        $adminFee = $this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE);
+        $this->assertEquals(70, $adminFee->total_charges, '35 students x $2, not the 100 in the enrolment section.');
+    }
+
+    public function test_retired_declarations_are_no_longer_asked_or_written(): void
+    {
+        $id = $this->startApplication(['affirm_branding_guide' => true, 'affirm_understands_comply' => true]);
+
+        $application = $this->application($id);
+        $this->assertEquals(1, $application->affirm_policy_manual);
+        $this->assertEquals(1, $application->affirm_authorized);
+        $this->assertNull($application->affirm_branding_guide);
+        $this->assertNull($application->affirm_understands_comply);
+    }
+
+    public function test_form_help_text_comes_from_maintenance_utils(): void
+    {
+        \App\Models\Util::where('field_key', 'help_per_student_fee_enrolment')->firstOrFail()
+            ->update(['field_name' => 'Count study permit students from last calendar year.', 'active_flag' => true]);
+
+        $this->inertiaGet('/web/applications/new')
+            ->assertJsonPath('props.settings.help.per_student_fee_enrolment', 'Count study permit students from last calendar year.')
+            ->assertJsonPath('props.settings.help.total_enrolment', config('eqa.help.total_enrolment'));
+    }
+
     // Fee exempt --------------------------------------------------------------------------
+
+    public function test_retired_enrolment_fields_are_no_longer_collected(): void
+    {
+        $id = $this->startApplication(['intl_students_permit' => 12, 'intl_students_other' => 30, 'enrolment_type' => 'FTE']);
+
+        $application = $this->application($id);
+        $this->assertEquals(12, $application->intl_students_permit);
+        $this->assertNull($application->intl_students_other, 'No longer relevant to the Act: never written.');
+        $this->assertNull($application->enrolment_type, 'Total Institution Enrolment says whether to use FTE or headcount.');
+    }
 
     public function test_fee_exempt_institution_is_never_charged_from_submission_to_designation(): void
     {
         DB::table('institutions')->where('crm_id', self::INSTITUTION)->update(['fee_exempt' => true]);
-        $id = $this->startApplication(['intl_students_permit' => 40]);
+        $id = $this->startApplication(['intl_students_permit' => 40, 'per_student_fee_enrolment' => 40]);
         $this->assertEquals(0, $this->application($id)->application_fee);
 
         $this->asInstitution()->post("/web/applications/{$id}/submit")->assertSessionHas('success');
@@ -808,6 +1076,13 @@ class ApplicationProcessTest extends TestCase
             ->assertJsonPath('props.awaitingSubmission', false);
         $this->asInstitution()->get("/web/applications/{$id}/edit")->assertOk();
 
+        // Returned before the newer sections existed: submitting first asks for what is missing.
+        $this->asInstitution()->post("/web/applications/{$id}/submit")
+            ->assertRedirect("/web/applications/{$id}/edit")
+            ->assertSessionHasErrors(['campus_locations', 'per_student_fee_enrolment']);
+        $this->assertSame('changes_requested', $this->application($id)->workflow_stage);
+
+        $this->asInstitution()->put("/web/applications/{$id}", $this->applicationForm())->assertRedirect();
         $this->asInstitution()->post("/web/applications/{$id}/submit")->assertSessionHas('success');
 
         $application = $this->application($id);
@@ -959,11 +1234,16 @@ class ApplicationProcessTest extends TestCase
 
     private function viewApplication(string $id): TestResponse
     {
+        return $this->inertiaGet("/web/applications/{$id}");
+    }
+
+    private function inertiaGet(string $url): TestResponse
+    {
         $version = (string) app(\App\Http\Middleware\HandleInertiaRequests::class)->version(request());
 
         return $this->asInstitution()
             ->withHeaders(['X-Inertia' => 'true', 'X-Inertia-Version' => $version])
-            ->get("/web/applications/{$id}")
+            ->get($url)
             ->assertOk();
     }
 
@@ -1000,7 +1280,23 @@ class ApplicationProcessTest extends TestCase
             'affirm_understands_comply' => true,
             'affirm_authorized' => true,
             'representative_signature' => 'Pat Contact',
+            'service_street1' => '100 Main Street',
+            'service_city' => 'Victoria',
+            'service_province' => 'BC',
+            'service_postal_code' => 'V8W 1A1',
+            'service_country' => 'Canada',
+            'service_address_confirmed' => true,
+            'campus_locations' => [['location_name' => 'Main Campus', 'street1' => '100 Main Street', 'city' => 'Victoria', 'province' => 'BC', 'postal_code' => 'V8W 1A1', 'primary_location' => true]],
+            'website_compliance' => $this->websiteComplianceAnswers(),
+            'per_student_fee_enrolment' => 0,
         ], $overrides);
+    }
+
+    /** @return array<int, array{url: string}> a link for every active Website Compliance item */
+    private function websiteComplianceAnswers(): array
+    {
+        return DB::table('website_compliance_items')->where('is_active', true)->pluck('id')
+            ->mapWithKeys(fn ($id): array => [$id => ['url' => 'https://process.example/info/'.$id]])->all();
     }
 
     private function vancouverDate(int $daysFromNow): string

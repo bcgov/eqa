@@ -47,6 +47,8 @@ class HandleInertiaRequests extends Middleware
                 'program_name' => config('eqa.ministry.program'),
                 'contact_email' => config('eqa.ministry.email'),
                 'privacy_email' => config('eqa.ministry.privacy_email'),
+                // "?" help bubbles on the application and institution profile forms.
+                'help' => config('eqa.help'),
             ],
         ];
     }

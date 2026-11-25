@@ -1,18 +1,20 @@
 <script setup>
-import { Head, Link, useForm } from '@inertiajs/vue3'
+import { Head, Link, useForm, usePage } from '@inertiajs/vue3'
 import { computed } from 'vue'
 import InfoTooltip from '../../Components/InfoTooltip.vue'
 
 const props = defineProps({
     institution: { type: Object, default: null },
     qaOptions: { type: Array, default: () => [] },
-    enrolmentTypes: { type: Array, default: () => [] },
     canEditDli: { type: Boolean, default: false },
     submitUrl: { type: String, default: '/web/institution' },
     cancelUrl: { type: String, default: '/web/institution' },
 })
 
 const inputClass = 'mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none'
+
+// "?" bubble text, maintained under Maintenance > Utils (Application Help Text).
+const help = computed(() => usePage().props.settings?.help ?? {})
 
 // Backward compatible: keep whatever QA Met Through value is already stored on
 // the institution selectable even if it is a legacy label (e.g. the old
@@ -41,10 +43,9 @@ const form = useForm({
     country: props.institution?.country ?? '',
     total_enrolment: props.institution?.total_enrolment ?? 0,
     intl_students_permit: props.institution?.intl_students_permit ?? 0,
-    intl_students_other: props.institution?.intl_students_other ?? 0,
+    // Enrolment Type and International Students - Other are retired: not asked, never written.
     in_person_students: props.institution?.in_person_students ?? 0,
     online_students: props.institution?.online_students ?? 0,
-    enrolment_type: props.institution?.enrolment_type ?? 'FTE',
 })
 
 function submit() {
@@ -119,28 +120,22 @@ function submit() {
         <section class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
             <h2 class="mb-4 text-sm font-semibold text-slate-700">Student Enrolment Information</h2>
             <div class="grid gap-4 sm:grid-cols-2">
-                <label class="block"><span class="text-sm text-slate-600">Total Institution Enrolment</span>
-                    <InfoTooltip class="ml-1" title="Total Institution Enrolment" text="Total Institution Enrolment includes all students (domestic and international) in all programs at the institution over the past 12 months." />
-                    <input v-model="form.total_enrolment" type="number" min="0" :class="inputClass" />
-                </label>
-                <label class="block"><span class="text-sm text-slate-600">Enrolment Type</span>
-                    <select v-model="form.enrolment_type" :class="inputClass">
-                        <option v-for="t in enrolmentTypes" :key="t" :value="t">{{ t }}</option>
-                    </select>
-                </label>
-                <label class="block"><span class="text-sm text-slate-600">Number of International Students - Study Permit</span>
-                    <input v-model="form.intl_students_permit" type="number" min="0" :class="inputClass" />
-                </label>
-                <label class="block"><span class="text-sm text-slate-600">Number of International Students - Other</span>
-                    <input v-model="form.intl_students_other" type="number" min="0" :class="inputClass" />
-                </label>
-                <label class="block"><span class="text-sm text-slate-600">Total Number of In-Person Students</span>
-                    <InfoTooltip class="ml-1" title="Total Number of In-Person Students" text="Include the number of students enrolled in a program where either 100% of the hours of instruction are delivered in-person or a combination of in-person and online delivery." />
-                    <input v-model="form.in_person_students" type="number" min="0" :class="inputClass" />
-                </label>
-                <label class="block"><span class="text-sm text-slate-600">Total Number of Online Students</span>
-                    <input v-model="form.online_students" type="number" min="0" :class="inputClass" />
-                </label>
+                <div class="block"><label for="app-total_enrolment" class="text-sm text-slate-600">Total Institution Enrolment</label>
+                    <InfoTooltip class="ml-1" title="Total Institution Enrolment" :text="help.total_enrolment" />
+                    <input id="app-total_enrolment" v-model="form.total_enrolment" type="number" min="0" :class="inputClass" />
+                </div>
+                <div class="block"><label for="app-intl_students_permit" class="text-sm text-slate-600">Number of International Students - Study Permit</label>
+                    <InfoTooltip class="ml-1" title="International Students - Study Permit" :text="help.intl_students_permit" />
+                    <input id="app-intl_students_permit" v-model="form.intl_students_permit" type="number" min="0" :class="inputClass" />
+                </div>
+                <div class="block"><label for="app-in_person_students" class="text-sm text-slate-600">Total Number of In-Person Students</label>
+                    <InfoTooltip class="ml-1" title="Total Number of In-Person Students" :text="help.in_person_students" />
+                    <input id="app-in_person_students" v-model="form.in_person_students" type="number" min="0" :class="inputClass" />
+                </div>
+                <div class="block"><label for="app-online_students" class="text-sm text-slate-600">Total Number of Online Students</label>
+                    <InfoTooltip class="ml-1" title="Total Number of Online Students" :text="help.online_students" />
+                    <input id="app-online_students" v-model="form.online_students" type="number" min="0" :class="inputClass" />
+                </div>
             </div>
         </section>
 

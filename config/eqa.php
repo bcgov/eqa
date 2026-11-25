@@ -44,4 +44,14 @@ return [
         'receipt_message' => 'Thank you. Your payment for invoice {invoice_number} has been received. Please keep this receipt for your records.',
     ],
 
+    // "?" help bubbles on the application and institution profile forms (defaults; editable under
+    // Maintenance > Utils, category Application Help Text).
+    'help' => [
+        'total_enrolment' => 'Domestic and international students over the last 12 months. For publics use FTE, for privates use headcount. PTIs: this is students in approved programs only.',
+        'intl_students_permit' => 'International Students are students who are studying in approved programs at your institution in Canada on a study permit.',
+        'in_person_students' => 'Students are deemed in-person if they are at the same physical location as the instructor for a minimum of 50% of instructional hours. Work Experience is not considered to be instructional hours.',
+        'online_students' => 'Students are deemed to be online if they are not in the same physical location as the instructor for more than 50% of instructional hours. Work Experience is not considered to be instructional hours.',
+        'per_student_fee_enrolment' => 'Should your application be approved, as per the regulations section 8(1)(a) you must pay $2 for each international student. The number of international students on study permits enroled in programs of instruction at the institution at any time during the calendar year that precedes the date the institution applies for the issuance or renewal of a designation certificate. Ie. If your application deadline is April 2026, provide the number of enroled students from Jan 1 2025-December 31 2025.',
+    ],
+
 ];

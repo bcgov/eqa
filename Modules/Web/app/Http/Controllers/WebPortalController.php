@@ -8,17 +8,22 @@ use App\Http\Controllers\Controller;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\ExpressPayService;
+use Closure;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 use Modules\Admin\Models\Application;
 use Modules\Admin\Services\ApplicationFeeService;
+use Modules\Admin\Services\ApplicationProfileService;
 use Modules\Admin\Services\ProcessNotifier;
+use Modules\Admin\Services\WebsiteComplianceService;
 
 /**
  * The institution (BCeID) web portal: an institution views its own profile
@@ -28,6 +33,23 @@ use Modules\Admin\Services\ProcessNotifier;
  */
 class WebPortalController extends Controller
 {
+    /** Number of steps of the application form (Web/NewApplication.vue). */
+    private const APPLICATION_STEPS = 6;
+
+    // sabc_designation is retired: no longer asked, and never written, so values on older applications are kept.
+    private const APPLICATION_FLAGS = [
+        'program_associate_degree', 'program_university_transfer', 'program_bachelors_degree', 'program_graduate_degree',
+        'program_career_training', 'program_language_training', 'program_theological_education', 'program_trades_apprenticeship',
+        'media_pamphlet', 'media_website', 'media_brochure', 'media_poster', 'media_banner', 'media_billboard',
+        'annual_report_filed',
+    ];
+
+    // affirm_branding_guide and affirm_understands_comply are retired (folded into the designation-mark
+    // affirmation): no longer asked, never written, so older applications keep their answers.
+    private const APPLICATION_AFFIRMATIONS = [
+        'affirm_policy_manual', 'affirm_website_compliance', 'affirm_written_permission', 'affirm_authorized',
+    ];
+
     private function institution(Request $request): ?object
     {
         $id = $request->session()->get('portal_institution');
@@ -194,6 +216,9 @@ class WebPortalController extends Controller
             'canEdit' => $fees->editableByInstitution($application),
             'canAppeal' => $fees->canAppeal($application),
             'awaitingSubmission' => $fees->awaitingSubmission($application),
+            'campusLocations' => app(ApplicationProfileService::class)->campusLocations($application->crm_id),
+            'previousNames' => app(ApplicationProfileService::class)->previousNames($application->crm_id),
+            'websiteCompliance' => app(WebsiteComplianceService::class)->copy($application->crm_id),
         ]);
     }
 
@@ -222,7 +247,6 @@ class WebPortalController extends Controller
                 'Ministers consent under the Degree Authorization Act (DAA)',
                 'Languages Canada Accreditation',
             ],
-            'enrolmentTypes' => ['FTE', 'Enrolment'],
         ]);
     }
 
@@ -245,10 +269,10 @@ class WebPortalController extends Controller
             'country' => ['nullable', 'string', 'max:100'],
             'total_enrolment' => ['nullable', 'integer', 'min:0'],
             'intl_students_permit' => ['nullable', 'integer', 'min:0'],
-            'intl_students_other' => ['nullable', 'integer', 'min:0'],
+            // intl_students_other is retired (no longer relevant to the Act): not asked, never written.
             'in_person_students' => ['nullable', 'integer', 'min:0'],
             'online_students' => ['nullable', 'integer', 'min:0'],
-            'enrolment_type' => ['nullable', 'string', 'max:50'],
+            // enrolment_type is retired too (Total Institution Enrolment's help says FTE or headcount).
         ]);
 
         DB::table('institutions')->where('crm_id', $institution->crm_id)->update($data);
@@ -578,7 +602,11 @@ class WebPortalController extends Controller
                 ->with('error', 'You already have an application that is submitted or under review. You cannot start a new one until it is finalized.');
         }
 
-        return Inertia::render('Web/NewApplication', ['institution' => $institution]);
+        return Inertia::render('Web/NewApplication', [
+            'institution' => $institution,
+            'previousNames' => app(ApplicationProfileService::class)->recentInstitutionNames($institution->crm_id),
+            'websiteCompliance' => app(WebsiteComplianceService::class)->formChecklist(null, $institution),
+        ]);
     }
 
     public function store(Request $request): RedirectResponse
@@ -591,7 +619,13 @@ class WebPortalController extends Controller
                 ->with('error', 'You already have an application that is submitted or under review. You cannot submit a new one until it is finalized.');
         }
 
-        $data = $this->validatedApplication($request);
+        $compliance = app(WebsiteComplianceService::class);
+        $checklist = $compliance->formChecklist(null, $institution);
+        $submitting = $this->submitting($request);
+        $data = $this->validatedApplication($request, $checklist, $submitting);
+        $previousNames = Arr::pull($data, 'previous_names') ?? [];
+        $campusLocations = Arr::pull($data, 'campus_locations') ?? [];
+        $complianceAnswers = Arr::pull($data, 'website_compliance') ?? [];
         $fees = app(ApplicationFeeService::class);
 
         $reference = 'APP-'.str_pad((string) $fees->nextNumber('applications', 'reference'), 8, '0', STR_PAD_LEFT);
@@ -605,31 +639,44 @@ class WebPortalController extends Controller
         $crmId = (string) Str::uuid();
 
         // Saved as a Draft; the application fee is invoiced once it is submitted.
-        DB::table('applications')->insert(array_merge($data, [
-            'crm_id' => $crmId,
-            'reference' => $reference,
-            'status' => 'Draft',
-            'workflow_stage' => 'draft',
-            'institution_crm_id' => $institution->crm_id,
-            'institution_name' => $institution->name,
-            'owner_name' => $institution->business_owner ?? null,
-            'application_date' => Carbon::now()->toDateString(),
-            'application_fee' => $amount,
-            'total_due' => $amount,
-        ]));
+        DB::transaction(function () use ($data, $crmId, $reference, $institution, $amount, $previousNames, $campusLocations, $compliance, $checklist, $complianceAnswers): void {
+            DB::table('applications')->insert(array_merge($data, [
+                'crm_id' => $crmId,
+                'reference' => $reference,
+                'status' => 'Draft',
+                'workflow_stage' => 'draft',
+                'institution_crm_id' => $institution->crm_id,
+                'institution_name' => $institution->name,
+                'owner_name' => $institution->business_owner ?? null,
+                'application_date' => Carbon::now()->toDateString(),
+                'application_fee' => $amount,
+                'total_due' => $amount,
+            ]));
+            app(ApplicationProfileService::class)->syncPreviousNames($crmId, $institution->crm_id, $previousNames);
+            app(ApplicationProfileService::class)->syncCampusLocations($crmId, $campusLocations);
+            $compliance->sync($crmId, $checklist, $complianceAnswers);
+        });
 
-        return redirect('/web/applications/'.$crmId)
-            ->with('success', 'Application '.$reference.' saved as a draft. Review it and select Submit Application when it is ready.');
+        if ($submitting) {
+            return $this->submitApplication(DB::table('applications')->where('crm_id', $crmId)->first());
+        }
+
+        return redirect($this->stepUrl($crmId, $request))
+            ->with('success', 'Application '.$reference.' saved as a draft. Continue through the steps and select Submit Application when it is complete.');
     }
 
     public function edit(Request $request, string $crmId): Response
     {
         $application = $this->ownApplication($request, $crmId);
         abort_unless(app(ApplicationFeeService::class)->editableByInstitution($application), 403);
+        $institution = $this->institution($request);
 
         return Inertia::render('Web/NewApplication', [
-            'institution' => $this->institution($request),
+            'institution' => $institution,
             'application' => $application,
+            'campusLocations' => app(ApplicationProfileService::class)->campusLocations($application->crm_id),
+            'previousNames' => app(ApplicationProfileService::class)->previousNames($application->crm_id),
+            'websiteCompliance' => app(WebsiteComplianceService::class)->formChecklist($application, $institution),
         ]);
     }
 
@@ -638,17 +685,55 @@ class WebPortalController extends Controller
         $application = $this->ownApplication($request, $crmId);
         abort_unless(app(ApplicationFeeService::class)->editableByInstitution($application), 403);
 
-        DB::table('applications')->where('crm_id', $crmId)->update($this->validatedApplication($request));
+        $compliance = app(WebsiteComplianceService::class);
+        $checklist = $compliance->formChecklist($application, $this->institution($request));
+        $submitting = $this->submitting($request);
+        $data = $this->validatedApplication($request, $checklist, $submitting);
+        $previousNames = Arr::pull($data, 'previous_names') ?? [];
+        $campusLocations = Arr::pull($data, 'campus_locations') ?? [];
+        $complianceAnswers = Arr::pull($data, 'website_compliance') ?? [];
+        DB::transaction(function () use ($crmId, $data, $previousNames, $campusLocations, $application, $compliance, $checklist, $complianceAnswers): void {
+            DB::table('applications')->where('crm_id', $crmId)->update($data);
+            app(ApplicationProfileService::class)->syncPreviousNames($crmId, (string) $application->institution_crm_id, $previousNames);
+            app(ApplicationProfileService::class)->syncCampusLocations($crmId, $campusLocations);
+            $compliance->sync($crmId, $checklist, $complianceAnswers);
+        });
 
-        return redirect('/web/applications/'.$crmId)->with('success', 'Application '.$application->reference.' updated.');
+        if ($submitting) {
+            return $this->submitApplication(DB::table('applications')->where('crm_id', $crmId)->first());
+        }
+
+        return redirect($this->stepUrl($crmId, $request))->with('success', 'Application '.$application->reference.' saved.');
     }
 
-    /** Submit a draft (the application fee is then invoiced), or resubmit requested additional information. */
+    /**
+     * Submit (or resubmit) from the application page: every step must be complete, otherwise the
+     * institution is taken back to the form with the missing information highlighted.
+     */
     public function submit(Request $request, string $crmId): RedirectResponse
     {
         $application = $this->ownApplication($request, $crmId);
         abort_unless(in_array($application->workflow_stage, ['draft', 'changes_requested'], true), 403);
 
+        $checklist = app(WebsiteComplianceService::class)->formChecklist($application, $this->institution($request));
+        $validator = Validator::make(
+            $this->savedApplicationData($application, $checklist),
+            $this->applicationRules($checklist, true),
+            $this->applicationMessages(),
+        );
+        if ($validator->fails()) {
+            return redirect('/web/applications/'.$crmId.'/edit')
+                ->withErrors($validator)
+                ->with('error', 'The application is not complete yet. Complete the highlighted steps, then select Submit Application.');
+        }
+
+        return $this->submitApplication($application);
+    }
+
+    /** Submit a draft (the application fee is then invoiced), or resubmit requested additional information. */
+    private function submitApplication(object $application): RedirectResponse
+    {
+        $crmId = (string) $application->crm_id;
         $fees = app(ApplicationFeeService::class);
         $firstSubmission = $fees->awaitingSubmission($application);
         $fees->submit($application);
@@ -695,45 +780,155 @@ class WebPortalController extends Controller
         return $application;
     }
 
-    /** @return array<string, mixed> */
-    private function validatedApplication(Request $request): array
+    /**
+     * Rules for the application form. Saving a draft ($complete false) only checks what has been entered,
+     * so the institution can save any step at any time; submitting ($complete true) also requires every step.
+     *
+     * @param  list<array<string, mixed>>  $complianceChecklist  the Website Compliance checklist this application answers
+     * @return array<string, mixed>
+     */
+    private function applicationRules(array $complianceChecklist, bool $complete): array
     {
-        // sabc_designation is retired: no longer asked, and never written, so values on older applications are kept.
-        $flags = [
-            'program_associate_degree', 'program_university_transfer', 'program_bachelors_degree', 'program_graduate_degree',
-            'program_career_training', 'program_language_training', 'program_theological_education', 'program_trades_apprenticeship',
-            'media_pamphlet', 'media_website', 'media_brochure', 'media_poster', 'media_banner', 'media_billboard',
-        ];
-        $affirmations = [
-            'affirm_policy_manual', 'affirm_website_compliance', 'affirm_written_permission',
-            'affirm_branding_guide', 'affirm_understands_comply', 'affirm_authorized',
-        ];
+        $required = $complete ? 'required' : 'nullable';
+        $today = Carbon::now('America/Vancouver')->toDateString();
+        $lookbackStart = app(ApplicationProfileService::class)->lookbackStart();
 
         $rules = [
             'total_enrolment' => ['nullable', 'integer', 'min:0'],
             'intl_students_permit' => ['nullable', 'integer', 'min:0'],
-            'intl_students_other' => ['nullable', 'integer', 'min:0'],
+            // intl_students_other is retired (no longer relevant to the Act): not asked, never written.
             'in_person_students' => ['nullable', 'integer', 'min:0'],
             'online_students' => ['nullable', 'integer', 'min:0'],
-            'enrolment_type' => ['nullable', 'string', 'max:50'],
+            // enrolment_type is retired too (Total Institution Enrolment's help says FTE or headcount).
+            'per_student_fee_enrolment' => [$required, 'integer', 'min:0', 'max:1000000'],
             'brand_usage_plan' => ['nullable', 'string', 'max:2000'],
             'other_logos_trademarks' => ['nullable', 'string', 'max:2000'],
             'affiliates_partners' => ['nullable', 'string', 'max:2000'],
-            'representative_signature' => ['required', 'string', 'max:255'],
+            'representative_signature' => [$required, 'string', 'max:255'],
+            // Campus locations entered on this application (not the institution's campuses; no status).
+            'campus_locations' => array_merge($complete ? ['required', 'array', 'min:1'] : ['nullable', 'array'], ['max:50', function (string $attribute, mixed $value, Closure $fail): void {
+                if (is_array($value) && count(array_filter($value, fn ($row): bool => is_array($row) && filter_var($row['primary_location'] ?? false, FILTER_VALIDATE_BOOLEAN))) > 1) {
+                    $fail('Only one campus location can be the primary location.');
+                }
+            }]),
+            'campus_locations.*' => ['array'],
+            'campus_locations.*.location_name' => ['required', 'string', 'max:255'],
+            'campus_locations.*.email' => ['nullable', 'email', 'max:255'],
+            'campus_locations.*.website' => ['nullable', 'string', 'max:255'],
+            'campus_locations.*.street1' => ['required', 'string', 'max:255'],
+            'campus_locations.*.street2' => ['nullable', 'string', 'max:255'],
+            'campus_locations.*.city' => ['required', 'string', 'max:255'],
+            'campus_locations.*.province' => ['required', 'string', 'max:100'],
+            'campus_locations.*.postal_code' => ['required', 'string', 'max:20'],
+            'campus_locations.*.country' => ['nullable', 'string', 'max:100'],
+            'campus_locations.*.primary_location' => ['nullable', 'boolean'],
+            // Address for service: prefilled from the institution profile, confirmed per application.
+            'service_street1' => [$required, 'string', 'max:255'],
+            'service_street2' => ['nullable', 'string', 'max:255'],
+            'service_city' => [$required, 'string', 'max:255'],
+            'service_province' => [$required, 'string', 'max:100'],
+            'service_postal_code' => [$required, 'string', 'max:20'],
+            'service_country' => [$required, 'string', 'max:100'],
+            'service_address_confirmed' => $complete ? ['accepted'] : ['nullable', 'boolean'],
+            // Operating names used in the last 5 years (stored in previous_operating_names).
+            'previous_names' => ['nullable', 'array', 'max:20'],
+            'previous_names.*' => ['array', function (string $attribute, mixed $value, Closure $fail) use ($lookbackStart, $today): void {
+                $end = is_array($value) ? (($value['used_to'] ?? null) ?: $today) : $today;
+                if (is_string($end) && $end < $lookbackStart) {
+                    $fail('Only list names used in the last '.ApplicationProfileService::NAME_LOOKBACK_YEARS.' years.');
+                }
+            }],
+            'previous_names.*.name' => ['required', 'string', 'max:255'],
+            'previous_names.*.used_from' => ['required', 'date_format:Y-m-d', 'before_or_equal:'.$today],
+            'previous_names.*.used_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:previous_names.*.used_from', 'before_or_equal:'.$today],
         ];
-        foreach ($flags as $flag) {
-            $rules[$flag] = ['boolean'];
+        foreach (self::APPLICATION_FLAGS as $flag) {
+            $rules[$flag] = ['nullable', 'boolean'];
         }
-        foreach ($affirmations as $affirmation) {
-            $rules[$affirmation] = ['accepted'];
+        foreach (self::APPLICATION_AFFIRMATIONS as $affirmation) {
+            $rules[$affirmation] = $complete ? ['accepted'] : ['nullable', 'boolean'];
         }
 
-        $data = $request->validate($rules);
-        foreach (array_merge($flags, $affirmations) as $field) {
+        // Website Compliance: a link and/or a comment for every item on the application's checklist.
+        return $rules + app(WebsiteComplianceService::class)->rules($complianceChecklist, $complete);
+    }
+
+    /** @return array<string, string> */
+    private function applicationMessages(): array
+    {
+        return app(WebsiteComplianceService::class)->messages() + [
+            'campus_locations.required' => 'Add at least one campus location.',
+            'campus_locations.min' => 'Add at least one campus location.',
+            'campus_locations.*.location_name.required' => 'Enter the location name.',
+            'campus_locations.*.street1.required' => 'Enter the street address.',
+            'campus_locations.*.city.required' => 'Enter the city.',
+            'campus_locations.*.province.required' => 'Enter the province.',
+            'campus_locations.*.postal_code.required' => 'Enter the postal code.',
+            'campus_locations.*.email.email' => 'Enter a valid email address.',
+            'service_street1.required' => 'Enter the street address for service.',
+            'service_city.required' => 'Enter the city for service.',
+            'service_province.required' => 'Enter the province for service.',
+            'service_postal_code.required' => 'Enter the postal code for service.',
+            'service_country.required' => 'Enter the country for service.',
+            'service_address_confirmed.accepted' => 'Confirm the address for service.',
+            'per_student_fee_enrolment.required' => 'Enter the number of international students for the per student fee.',
+            'per_student_fee_enrolment.integer' => 'Enter a whole number.',
+            'representative_signature.required' => 'Enter the institutional representative signature.',
+            'accepted' => 'Confirm this affirmation.',
+            'previous_names.*.name.required' => 'Enter the previous operating name.',
+            'previous_names.*.used_from.required' => 'Enter the date the name was first used.',
+            'previous_names.*.used_from.before_or_equal' => 'The date first used cannot be in the future.',
+            'previous_names.*.used_to.after_or_equal' => 'The date last used must be on or after the date first used.',
+            'previous_names.*.used_to.before_or_equal' => 'The date last used cannot be in the future.',
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $complianceChecklist
+     * @return array<string, mixed>
+     */
+    private function validatedApplication(Request $request, array $complianceChecklist, bool $complete): array
+    {
+        $data = $request->validate($this->applicationRules($complianceChecklist, $complete), $this->applicationMessages());
+        foreach (array_merge(self::APPLICATION_FLAGS, self::APPLICATION_AFFIRMATIONS, ['service_address_confirmed']) as $field) {
             $data[$field] = $request->boolean($field);
         }
 
         return $data;
+    }
+
+    /**
+     * Everything saved on the application, in the form's shape, to check it is complete before submitting.
+     *
+     * @param  list<array<string, mixed>>  $complianceChecklist  with the saved answers
+     * @return array<string, mixed>
+     */
+    private function savedApplicationData(object $application, array $complianceChecklist): array
+    {
+        $profile = app(ApplicationProfileService::class);
+        $data = (array) $application;
+        $data['campus_locations'] = $profile->campusLocations((string) $application->crm_id);
+        $data['previous_names'] = $profile->previousNames((string) $application->crm_id);
+        $data['website_compliance'] = [];
+        foreach ($complianceChecklist as $section) {
+            foreach ($section['items'] as $item) {
+                $data['website_compliance'][$item['key']] = ['url' => $item['url'], 'comment' => $item['comment']];
+            }
+        }
+
+        return $data;
+    }
+
+    /** "Submit Application" on the form (rather than "Save Draft"). */
+    private function submitting(Request $request): bool
+    {
+        return $request->input('intent') === 'submit';
+    }
+
+    /** After saving a draft, return to the step the institution was on. */
+    private function stepUrl(string $crmId, Request $request): string
+    {
+        return '/web/applications/'.$crmId.'/edit?step='.max(1, min(self::APPLICATION_STEPS, (int) $request->input('step', 1)));
     }
 
     /** Human label for the acting institution portal user, for change notifications. */

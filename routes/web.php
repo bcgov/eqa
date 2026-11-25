@@ -18,6 +18,7 @@ use Modules\Admin\Http\Controllers\InvoiceController;
 use Modules\Admin\Http\Controllers\MaintenanceController;
 use Modules\Admin\Http\Controllers\ReportController;
 use Modules\Admin\Http\Controllers\StaffController;
+use Modules\Admin\Http\Controllers\WebsiteComplianceController;
 use Modules\Web\Http\Controllers\PaymentController;
 use Modules\Web\Http\Controllers\WebPortalController;
 
@@ -201,6 +202,15 @@ Route::middleware('role:'.Role::MINISTRY_ADMIN.','.Role::SUPER_ADMIN)->group(fun
 
     Route::get('/admin/maintenance/invoice', [MaintenanceController::class, 'invoice'])->name('admin.maintenance.invoice');
     Route::get('/admin/maintenance/invoice/preview', [MaintenanceController::class, 'previewInvoice'])->name('admin.maintenance.invoice.preview');
+
+    // Website Compliance checklist shown on the application (submitted applications keep their own copy).
+    Route::get('/admin/maintenance/website-compliance', [WebsiteComplianceController::class, 'index'])->name('admin.maintenance.website-compliance');
+    Route::post('/admin/maintenance/website-compliance/sections', [WebsiteComplianceController::class, 'storeSection'])->name('admin.maintenance.website-compliance.sections.store');
+    Route::put('/admin/maintenance/website-compliance/sections/{section}', [WebsiteComplianceController::class, 'updateSection'])->name('admin.maintenance.website-compliance.sections.update');
+    Route::post('/admin/maintenance/website-compliance/sections/{section}/move', [WebsiteComplianceController::class, 'moveSection'])->name('admin.maintenance.website-compliance.sections.move');
+    Route::post('/admin/maintenance/website-compliance/items', [WebsiteComplianceController::class, 'storeItem'])->name('admin.maintenance.website-compliance.items.store');
+    Route::put('/admin/maintenance/website-compliance/items/{item}', [WebsiteComplianceController::class, 'updateItem'])->name('admin.maintenance.website-compliance.items.update');
+    Route::post('/admin/maintenance/website-compliance/items/{item}/move', [WebsiteComplianceController::class, 'moveItem'])->name('admin.maintenance.website-compliance.items.move');
 
     // Fee exemption waives every fee for the institution, so it is limited to Ministry Admins.
     Route::put('/admin/institutions/{crmId}/fee-exempt', [InstitutionController::class, 'updateFeeExempt'])->name('admin.institution.fee-exempt');

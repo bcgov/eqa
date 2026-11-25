@@ -111,8 +111,6 @@ class ApplicationWorkflowController extends Controller
             'affirm_policy_manual' => ['boolean'],
             'affirm_website_compliance' => ['boolean'],
             'affirm_written_permission' => ['boolean'],
-            'affirm_branding_guide' => ['boolean'],
-            'affirm_understands_comply' => ['boolean'],
             'affirm_authorized' => ['boolean'],
             'representative_signature' => ['nullable', 'string', 'max:255'],
         ]);

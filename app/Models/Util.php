@@ -41,6 +41,11 @@ class Util extends Model
         'invoice_footer' => 'eqa.invoice.footer',
         'invoice_receipt_title' => 'eqa.invoice.receipt_title',
         'invoice_receipt_message' => 'eqa.invoice.receipt_message',
+        'help_total_enrolment' => 'eqa.help.total_enrolment',
+        'help_intl_students_permit' => 'eqa.help.intl_students_permit',
+        'help_in_person_students' => 'eqa.help.in_person_students',
+        'help_online_students' => 'eqa.help.online_students',
+        'help_per_student_fee_enrolment' => 'eqa.help.per_student_fee_enrolment',
     ];
 
     /** @var array<string, mixed>|null config defaults captured before the first override */
