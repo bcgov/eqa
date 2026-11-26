@@ -551,6 +551,13 @@ class ApplicationFeeService
         ]);
 
         $application = DB::table('applications')->where('crm_id', $application->crm_id)->first();
+
+        // The institution's profile enrolment follows the most recent approved application, and an
+        // institution that is not yet Designated is designated now (renewals extend once the fee is paid).
+        $this->designation->syncEnrolmentFromApplication($application);
+        $this->designation->designateOnApproval($application, $today, $application->designation_expiry);
+        $application = DB::table('applications')->where('crm_id', $application->crm_id)->first();
+
         $invoice = $this->createQuotedInvoice($application, self::FEE_ADMIN_VARIABLE, $quote, $due);
 
         // Nothing to pay (e.g. public institution with no international students, or fee exempt): designate now.
@@ -646,6 +653,10 @@ class ApplicationFeeService
                         ? ['workflow_stage' => 'end', 'status' => 'Expired']
                         : ['workflow_stage' => 'end', 'status' => 'Not Approved']
                 );
+                if ($stage === 'admin_fee') {
+                    // Designated on approval but the administrative fee was never paid.
+                    $this->designation->undoDesignationOnApproval(DB::table('applications')->where('crm_id', $row->application_crm_id)->first());
+                }
                 $counts[$stage === 'admin_fee' ? 'admin_fee' : 'appeal']++;
             }
         }

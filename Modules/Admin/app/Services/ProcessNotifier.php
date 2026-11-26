@@ -416,17 +416,22 @@ class ProcessNotifier
     // ---------------------------------------------------------------------
 
     /**
-     * Resolve the institution's best portal contact — name + email. Prefers an
-     * active administrator with an email, then any active portal user, then any
-     * user with an email; falls back to the institution's primary_contact name.
+     * Resolve the institution's contact — name + email. The primary contact email recorded by the
+     * ministry on the institution profile wins; otherwise the best portal contact: an active
+     * administrator with an email, then any active portal user, then any user with an email.
+     * The name is the institution's primary_contact when set.
      *
      * @return array{name: string, email: string}
      */
     private function contact(?object $institution): array
     {
         $name = (string) ($institution->primary_contact ?? '');
-        $email = '';
+        $email = trim((string) ($institution->primary_contact_email ?? ''));
         $crmId = $institution->crm_id ?? null;
+
+        if ($email !== '') {
+            return ['name' => trim($name), 'email' => $email];
+        }
 
         if ($crmId && Schema::hasTable('institution_users')) {
             $user = DB::table('institution_users')

@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
+use Modules\Admin\Services\ApplicationProfileService;
 
 /**
  * Public directory of EQA-designated institutions, modelled on the PTIB
@@ -96,6 +97,12 @@ class InstitutionDirectoryController extends Controller
                         'address' => $this->address($d),
                         'website' => $d->website,
                     ])->all(),
+                // Past names from the most recent submitted application, used within the last 5 years.
+                'previous_names' => array_map(fn (array $n): array => [
+                    'name' => $n['name'],
+                    'used_from' => $this->date($n['used_from']),
+                    'used_to' => $this->date($n['used_to']),
+                ], app(ApplicationProfileService::class)->publicPreviousNames($crmId)),
             ],
         ]);
     }
@@ -132,6 +139,14 @@ class InstitutionDirectoryController extends Controller
                             ->whereColumn('dbas.institution_crm_id', 'institutions.crm_id')
                             ->where('dbas.status', 'Active')
                             ->whereRaw("lower(dbas.name) like ? escape '!'", [$like]));
+                    }
+                    if (Schema::hasTable('previous_operating_names')) {
+                        $profile = app(ApplicationProfileService::class);
+                        $q->orWhereExists(fn (Builder $p) => $p->from('previous_operating_names')
+                            ->where('previous_operating_names.application_crm_id', '=', $profile->latestSubmittedApplicationQuery('institutions.crm_id', true))
+                            ->where(fn (Builder $w) => $w->whereNull('previous_operating_names.used_to')
+                                ->orWhere('previous_operating_names.used_to', '>=', $profile->lookbackStart()))
+                            ->whereRaw("lower(previous_operating_names.name) like ? escape '!'", [$like]));
                     }
                 });
             })

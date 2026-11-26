@@ -166,6 +166,7 @@ const stepComplete = computed(() => [
         && form.campus_locations.every((l) => ['location_name', 'street1', 'city', 'province', 'postal_code'].every((f) => filled(l[f])))
         && ['service_street1', 'service_city', 'service_province', 'service_postal_code', 'service_country'].every((f) => filled(form[f]))
         && !!form.service_address_confirmed
+        && !!form.annual_report_filed
         && form.previous_names.every((n) => filled(n.name) && filled(n.used_from)),
     true,
     true,
@@ -384,9 +385,10 @@ function save(intent) {
                 <fieldset class="mt-6">
                     <legend class="text-sm font-medium text-slate-600">BC Registry Services</legend>
                     <label class="mt-2 flex items-start gap-2 text-sm text-slate-700">
-                        <input type="checkbox" v-model="form.annual_report_filed" class="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600" />
-                        <span>Have you filed your annual report with BC Registry Services?</span>
+                        <input type="checkbox" v-model="form.annual_report_filed" aria-required="true" class="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600" />
+                        <span>Institution is currently in compliance with BC Registry Services and up to date on filing of annual reports.<span class="text-red-600"> *</span></span>
                     </label>
+                    <p v-if="form.errors.annual_report_filed" class="ml-6 mt-1 text-xs text-red-600">{{ form.errors.annual_report_filed }}</p>
                 </fieldset>
             </section>
             </div>

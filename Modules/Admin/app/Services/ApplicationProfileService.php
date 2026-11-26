@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Modules\Admin\Services;
 
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Modules\Admin\Models\ApplicationCampusLocation;
 use Modules\Admin\Models\PreviousOperatingName;
 
@@ -75,6 +77,42 @@ class ApplicationProfileService
     public function previousNames(string $applicationCrmId): array
     {
         return $this->rows(PreviousOperatingName::where('application_crm_id', $applicationCrmId)->orderByDesc('used_from')->get());
+    }
+
+    /**
+     * The institution's most recent submitted application (any stage after Draft): the source of the
+     * previous operating names published in the public Institution Directory.
+     */
+    public function latestSubmittedApplicationQuery(string $institutionCrmIdColumnOrValue, bool $correlated = false): Builder
+    {
+        return DB::table('applications')
+            ->select('applications.crm_id')
+            ->when($correlated,
+                fn ($q) => $q->whereColumn('applications.institution_crm_id', $institutionCrmIdColumnOrValue),
+                fn ($q) => $q->where('applications.institution_crm_id', $institutionCrmIdColumnOrValue))
+            ->where('applications.workflow_stage', '<>', 'draft')
+            ->orderByDesc('applications.application_date')
+            ->orderByDesc('applications.reference')
+            ->limit(1);
+    }
+
+    /**
+     * Previous operating names to publish: those declared on the most recent submitted application
+     * that were used within the last 5 years.
+     *
+     * @return list<array{name: string, used_from: string, used_to: ?string}>
+     */
+    public function publicPreviousNames(string $institutionCrmId): array
+    {
+        $applicationCrmId = $this->latestSubmittedApplicationQuery($institutionCrmId)->value('crm_id');
+        if ($applicationCrmId === null) {
+            return [];
+        }
+
+        return $this->rows(PreviousOperatingName::where('application_crm_id', $applicationCrmId)
+            ->where(fn ($q) => $q->whereNull('used_to')->orWhere('used_to', '>=', $this->lookbackStart()))
+            ->orderByDesc('used_from')
+            ->get());
     }
 
     /**

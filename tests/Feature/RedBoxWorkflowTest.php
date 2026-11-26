@@ -261,8 +261,8 @@ class RedBoxWorkflowTest extends TestCase
         $this->assertSame(['multi_location', 'international_students'], array_column(json_decode($invoice->line_items, true), 'code'));
         $this->assertSame('Unpaid', $invoice->invoice_status);
         $this->assertSame(Carbon::now('America/Vancouver')->addDays(30)->toDateString(), $invoice->due_date);
-        // Designation waits for the fee.
-        $this->assertNull(DB::table('institutions')->where('crm_id', self::INSTITUTION)->value('eqa_status'));
+        // A first-time applicant is Designated on approval; the fee is still due.
+        $this->assertSame('Designated', DB::table('institutions')->where('crm_id', self::INSTITUTION)->value('eqa_status'));
         $this->assertNotified('application_approved_fee_due', $invoice->invoice_number);
     }
 
@@ -323,7 +323,7 @@ class RedBoxWorkflowTest extends TestCase
 
         $this->assertSame('Expired', $this->application($id)->status);
         $this->assertSame('Expired', $this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE)->invoice_status);
-        $this->assertNull(DB::table('institutions')->where('crm_id', self::INSTITUTION)->value('eqa_status'));
+        $this->assertSame('Not Approved', DB::table('institutions')->where('crm_id', self::INSTITUTION)->value('eqa_status'), 'Designated on approval, undone when the fee is not paid.');
     }
 
     public function test_appeal_button_shows_up_within_deadline(): void
@@ -540,6 +540,7 @@ class RedBoxWorkflowTest extends TestCase
             'campus_locations' => [['location_name' => 'Main Campus', 'street1' => '100 Main Street', 'city' => 'Victoria', 'province' => 'BC', 'postal_code' => 'V8W 1A1', 'primary_location' => true]],
             'website_compliance' => $this->websiteComplianceAnswers(),
             'per_student_fee_enrolment' => 0,
+            'annual_report_filed' => true,
         ], $overrides);
     }
 

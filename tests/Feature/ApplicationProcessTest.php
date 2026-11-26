@@ -123,7 +123,7 @@ class ApplicationProcessTest extends TestCase
         $this->assertEquals(80, $adminFee->total_charges, '40 study permit students x $2; one location, so no multiple location fee.');
         $this->assertSame($this->vancouverDate(30), $adminFee->due_date);
         $this->assertEmailed('application_approved_fee_due', $adminFee->invoice_number);
-        $this->assertNotSame('Designated', $this->institution()->eqa_status, 'Designation waits for the administrative fee.');
+        $this->assertSame('Designated', $this->institution()->eqa_status, 'A first-time applicant is Designated on approval.');
 
         $this->payOnline($adminFee);
 
@@ -412,10 +412,14 @@ class ApplicationProcessTest extends TestCase
 
         // Editing the draft replaces the names declared on it.
         $this->asInstitution()->put("/web/applications/{$id}", $this->applicationForm([
+            'annual_report_filed' => false,
             'previous_names' => [['name' => 'Process Academy', 'used_from' => $this->vancouverDate(-900), 'used_to' => $this->vancouverDate(-30)]],
         ]))->assertSessionHas('success');
         $this->assertSame(['Process Academy'], DB::table('previous_operating_names')->where('application_crm_id', $id)->pluck('name')->all());
-        $this->assertEquals(0, $this->application($id)->annual_report_filed, 'Unticked: not filed.');
+        $this->assertEquals(0, $this->application($id)->annual_report_filed, 'A draft can be saved unticked.');
+
+        $this->asInstitution()->post("/web/applications/{$id}/submit")
+            ->assertSessionHasErrors(['annual_report_filed' => 'Confirm the institution is in compliance with BC Registry Services and up to date on filing of annual reports.']);
     }
 
     public function test_address_for_service_must_be_confirmed_and_names_must_be_from_the_last_five_years(): void
@@ -612,6 +616,69 @@ class ApplicationProcessTest extends TestCase
         $this->asMinistry()->post("/admin/maintenance/website-compliance/items/{$second}/move", ['direction' => 'up'])->assertRedirect();
 
         $this->assertSame([$second, $first], DB::table('website_compliance_items')->where('section_id', $section)->orderBy('sort_order')->limit(2)->pluck('id')->all());
+    }
+
+    // Designation on approval and enrolment on the profile ---------------------------------
+
+    public function test_first_time_applicant_is_designated_on_approval_and_its_enrolment_copied_to_the_profile(): void
+    {
+        DB::table('institutions')->where('crm_id', self::INSTITUTION)->update(['eqa_status' => 'Pending', 'total_enrolment' => 10]);
+        $id = $this->applicationAt('application_approval', [
+            'total_enrolment' => 640, 'intl_students_permit' => 25, 'in_person_students' => 600, 'online_students' => 40, 'designation_expiry' => '2028-03-31',
+        ]);
+
+        $this->advance($id, 'approve')->assertSessionHas('success', fn (string $m): bool => str_contains($m, 'the institution is Designated'));
+
+        $institution = $this->institution();
+        $this->assertSame('Designated', $institution->eqa_status, 'Before the administrative fee is paid.');
+        $this->assertSame('2028-03-31', $institution->designation_expiry);
+        $this->assertSame([640, 25, 600, 40], [(int) $institution->total_enrolment, (int) $institution->intl_students_permit, (int) $institution->in_person_students, (int) $institution->online_students]);
+        $this->assertSame('Pending', $this->application($id)->prior_eqa_status);
+
+        // The ministry can still edit the profile enrolment by hand.
+        $this->asMinistry()->put('/admin/institutions/'.self::INSTITUTION, ['name' => 'Process College', 'total_enrolment' => 700])->assertSessionHas('success');
+        $this->assertEquals(700, $this->institution()->total_enrolment);
+    }
+
+    public function test_unpaid_administrative_fee_undoes_a_designation_made_on_approval(): void
+    {
+        DB::table('institutions')->where('crm_id', self::INSTITUTION)->update(['eqa_status' => 'Pending']);
+        $id = $this->applicationAt('application_approval');
+        $this->advance($id, 'approve');
+        $this->assertSame('Designated', $this->institution()->eqa_status);
+
+        $this->travel(31)->days();
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
+
+        $institution = $this->institution();
+        $this->assertSame('Not Approved', $institution->eqa_status);
+        $this->assertNull($institution->designation_start);
+        $this->assertNull($institution->designation_expiry);
+    }
+
+    public function test_approval_warns_when_ptiru_standing_prevents_the_designation(): void
+    {
+        DB::table('institutions')->where('crm_id', self::INSTITUTION)->update([
+            'eqa_status' => 'Pending', 'qa_met_through' => DesignationService::PTIRU_QA_MET_THROUGH, 'ptib_standing' => 'Not in Good Standing',
+        ]);
+        $id = $this->applicationAt('application_approval');
+
+        $this->advance($id, 'approve')
+            ->assertSessionHas('success')
+            ->assertSessionHas('error', fn (string $m): bool => str_contains($m, 'could not be Designated'));
+        $this->assertSame('Pending', $this->institution()->eqa_status);
+    }
+
+    public function test_notifications_go_to_the_primary_contact_email_when_one_is_recorded(): void
+    {
+        DB::table('institutions')->where('crm_id', self::INSTITUTION)->update(['primary_contact' => 'Robin Primary', 'primary_contact_email' => 'robin@process.example']);
+        $id = $this->applicationAt('under_review');
+
+        $this->advance($id, 'request_changes', ['changes' => 'Upload the policy manual.'])->assertSessionHas('success');
+
+        $email = DB::table('sent_emails')->where('template_key', 'application_changes_requested')->first();
+        $this->assertSame('robin@process.example', $email->intended_recipient);
+        $this->assertStringContainsString('Robin Primary', $email->body);
     }
 
     // Per Student Fee Payment Enrollment, declarations and help text ---------------------
@@ -1289,6 +1356,7 @@ class ApplicationProcessTest extends TestCase
             'campus_locations' => [['location_name' => 'Main Campus', 'street1' => '100 Main Street', 'city' => 'Victoria', 'province' => 'BC', 'postal_code' => 'V8W 1A1', 'primary_location' => true]],
             'website_compliance' => $this->websiteComplianceAnswers(),
             'per_student_fee_enrolment' => 0,
+            'annual_report_filed' => true,
         ], $overrides);
     }
 

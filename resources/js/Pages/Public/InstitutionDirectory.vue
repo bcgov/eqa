@@ -71,6 +71,7 @@ const tabs = computed(() => {
         { key: 'contact', label: 'Contact Details' },
     ]
     if (props.institution.dbas.length) list.push({ key: 'dbas', label: 'Doing Business As' })
+    if ((props.institution.previous_names ?? []).length) list.push({ key: 'previous', label: 'Previous Names' })
     return list
 })
 
@@ -325,6 +326,26 @@ const pageRange = computed(() => {
                                     </tbody>
                                 </table>
                             </div>
+
+                            <div v-else-if="tab === 'previous'" id="panel-previous" role="tabpanel" aria-labelledby="tab-previous" class="p-4">
+                                <p class="mb-3 text-sm text-slate-600">Names this institution has operated under in the last 5 years.</p>
+                                <table class="w-full border border-slate-400 text-sm text-slate-700">
+                                    <thead class="bg-slate-100">
+                                        <tr class="border-b border-slate-400">
+                                            <th scope="col" class="border-r border-slate-400 p-2 text-left font-semibold">Name</th>
+                                            <th scope="col" class="border-r border-slate-400 p-2 text-left font-semibold">Used From</th>
+                                            <th scope="col" class="p-2 text-left font-semibold">Used To</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="(n, index) in institution.previous_names" :key="index" class="border-b border-slate-400 last:border-b-0 align-top">
+                                            <td class="border-r border-slate-400 p-2">{{ n.name }}</td>
+                                            <td class="border-r border-slate-400 p-2">{{ n.used_from || '—' }}</td>
+                                            <td class="p-2">{{ n.used_to || 'Present' }}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </template>
                 </section>
@@ -340,7 +361,7 @@ const pageRange = computed(() => {
                                 class="mt-1 block w-full rounded border border-slate-400 bg-white px-2 py-1 font-normal"
                                 @input="onKeywords"
                             />
-                            <span class="mt-1 block text-xs font-normal text-slate-500">{{ isPrevious ? 'Institution name, legal name or business name' : 'Institution name, legal name, DLI number or business name' }}</span>
+                            <span class="mt-1 block text-xs font-normal text-slate-500">{{ isPrevious ? 'Institution name, legal name, business name or previous name' : 'Institution name, legal name, DLI number, business name or previous name' }}</span>
                         </label>
                         <label class="block font-semibold text-slate-700">City
                             <select

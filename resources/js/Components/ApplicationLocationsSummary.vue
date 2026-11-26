@@ -44,7 +44,7 @@ const confirmed = () => [true, 1, '1', 't'].includes(props.application.service_a
         </div>
         <div>
             <h3 class="mb-2 font-medium text-slate-700">BC Registry Services</h3>
-            <p class="text-slate-800">Annual report filed with BC Registry Services: <span class="font-medium">{{ [true, 1, '1', 't'].includes(application.annual_report_filed) ? 'Yes' : 'No' }}</span></p>
+            <p class="text-slate-800">Institution is currently in compliance with BC Registry Services and up to date on filing of annual reports: <span class="font-medium">{{ [true, 1, '1', 't'].includes(application.annual_report_filed) ? 'Yes' : 'No' }}</span></p>
         </div>
     </div>
 </template>

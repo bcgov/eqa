@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia;
@@ -102,6 +103,37 @@ class InstitutionDirectoryPageTest extends TestCase
     }
 
     /** @param  array<string, mixed>  $extra */
+    public function test_detail_lists_previous_names_from_the_latest_submitted_application_and_search_finds_them(): void
+    {
+        $crmId = $this->institution('Alpha College', 'Designated');
+        $older = (string) Str::uuid();
+        $latest = (string) Str::uuid();
+        $draft = (string) Str::uuid();
+        DB::table('applications')->insert([
+            ['crm_id' => $older, 'reference' => 'APP-1', 'institution_crm_id' => $crmId, 'workflow_stage' => 'end', 'status' => 'Approved', 'application_date' => '2024-01-10'],
+            ['crm_id' => $latest, 'reference' => 'APP-2', 'institution_crm_id' => $crmId, 'workflow_stage' => 'under_review', 'status' => 'Under Review', 'application_date' => '2026-01-10'],
+            ['crm_id' => $draft, 'reference' => 'APP-3', 'institution_crm_id' => $crmId, 'workflow_stage' => 'draft', 'status' => 'Draft', 'application_date' => '2026-06-01'],
+        ]);
+        $recent = Carbon::now('America/Vancouver')->subYears(2)->toDateString();
+        $ancient = Carbon::now('America/Vancouver')->subYears(7)->toDateString();
+        DB::table('previous_operating_names')->insert([
+            ['institution_crm_id' => $crmId, 'application_crm_id' => $older, 'name' => 'Old Application Name', 'used_from' => '2020-01-01', 'used_to' => $recent],
+            ['institution_crm_id' => $crmId, 'application_crm_id' => $latest, 'name' => 'Alpha Academy', 'used_from' => '2019-01-01', 'used_to' => $recent],
+            ['institution_crm_id' => $crmId, 'application_crm_id' => $latest, 'name' => 'Ancient Name', 'used_from' => '2010-01-01', 'used_to' => $ancient],
+            ['institution_crm_id' => $crmId, 'application_crm_id' => $draft, 'name' => 'Draft Only Name', 'used_from' => '2022-01-01', 'used_to' => null],
+        ]);
+
+        $this->get("/institution-directory/{$crmId}")
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->has('institution.previous_names', 1)
+                ->where('institution.previous_names.0.name', 'Alpha Academy')
+                ->where('institution.previous_names.0.used_from', 'January 1, 2019'));
+
+        $this->get('/institution-directory?q=academy')->assertInertia(fn (AssertableInertia $page) => $page->where('institutions.total', 1));
+        $this->get('/institution-directory?q=draft only')->assertInertia(fn (AssertableInertia $page) => $page->where('institutions.total', 0));
+        $this->get('/institution-directory?q=ancient')->assertInertia(fn (AssertableInertia $page) => $page->where('institutions.total', 0));
+    }
+
     private function institution(string $name, string $status, array $extra = []): string
     {
         $crmId = (string) Str::uuid();

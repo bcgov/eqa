@@ -145,21 +145,22 @@ class DesignationService
     /**
      * Application approved -> institution becomes Designated. Keeps an existing
      * designation start date (renewals) and adopts the application's expiry.
+     * Returns false when the PTIRU gate prevents the designation.
      */
-    public function onApplicationApproved(object $application, string $approvedDate, ?string $designationExpiry): void
+    public function onApplicationApproved(object $application, string $approvedDate, ?string $designationExpiry): bool
     {
         if (empty($application->institution_crm_id)) {
-            return;
+            return false;
         }
         $institution = DB::table('institutions')->where('crm_id', $application->institution_crm_id)->first();
         if ($institution === null) {
-            return;
+            return false;
         }
 
         // PTIRU gate: an approved application cannot designate an institution whose
         // QA is met through PTIRU Designation while its PTIRU Standing is not good.
         if (! self::ptiruPermitsDesignation($institution->qa_met_through, $institution->ptib_standing)) {
-            return;
+            return false;
         }
 
         $updates = [
@@ -173,6 +174,72 @@ class DesignationService
         }
 
         DB::table('institutions')->where('crm_id', $application->institution_crm_id)->update($updates);
+
+        return true;
+    }
+
+    /**
+     * The ministry approved an application of an institution that is not currently Designated (a
+     * first-time applicant, or one re-applying after a decline or de-designation): it is Designated
+     * now, without waiting for the administrative fee. Its previous EQA Status is kept on the
+     * application so an unpaid fee can undo it. Returns whether the institution is now Designated.
+     */
+    public function designateOnApproval(object $application, string $approvedDate, ?string $designationExpiry): bool
+    {
+        $institution = empty($application->institution_crm_id)
+            ? null
+            : DB::table('institutions')->where('crm_id', $application->institution_crm_id)->first();
+        if ($institution === null) {
+            return false;
+        }
+        if ($institution->eqa_status === 'Designated') {
+            return true;
+        }
+
+        if (! $this->onApplicationApproved($application, $approvedDate, $designationExpiry)) {
+            return false;
+        }
+        DB::table('applications')->where('crm_id', $application->crm_id)->update(['prior_eqa_status' => $institution->eqa_status ?: 'Pending']);
+
+        return true;
+    }
+
+    /**
+     * The administrative fee of an application that designated the institution on approval was never
+     * paid: the institution goes back to not designated (Not Approved for a first-time applicant).
+     */
+    public function undoDesignationOnApproval(object $application): void
+    {
+        $prior = $application->prior_eqa_status ?? null;
+        if ($prior === null || empty($application->institution_crm_id)) {
+            return;
+        }
+        $institution = DB::table('institutions')->where('crm_id', $application->institution_crm_id)->first();
+        if ($institution === null || $institution->eqa_status !== 'Designated') {
+            return;
+        }
+
+        $updates = in_array($prior, ['', 'Pending', 'Not Approved'], true)
+            ? ['eqa_status' => 'Not Approved', 'designation_start' => null, 'designation_expiry' => null]
+            : ['eqa_status' => $prior, 'de_designated_date' => self::today()];
+
+        DB::table('institutions')->where('crm_id', $application->institution_crm_id)->update($updates);
+    }
+
+    /** Institution enrolment follows the most recent approved application (the ministry can still edit it). */
+    public function syncEnrolmentFromApplication(object $application): void
+    {
+        if (empty($application->institution_crm_id)) {
+            return;
+        }
+        $updates = collect(['total_enrolment', 'intl_students_permit', 'in_person_students', 'online_students'])
+            ->mapWithKeys(fn (string $field): array => [$field => $application->{$field} ?? null])
+            ->filter(fn ($value): bool => $value !== null)
+            ->all();
+
+        if ($updates !== []) {
+            DB::table('institutions')->where('crm_id', $application->institution_crm_id)->update($updates);
+        }
     }
 
     /**

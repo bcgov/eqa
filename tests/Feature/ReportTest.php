@@ -83,6 +83,17 @@ class ReportTest extends TestCase
             ->assertJsonPath('props.report.rows.0.email', 'ada@alpha.test');
     }
 
+    public function test_primary_contact_email_recorded_by_the_ministry_wins(): void
+    {
+        $this->institution('inst-a', 'Alpha College', ['primary_contact' => 'Pat Primary', 'primary_contact_email' => 'pat.primary@alpha.test']);
+        $this->contact('inst-a', 'Ada Admin', 'ada@alpha.test', ['role' => 'Admin', 'web_user_active' => true]);
+
+        $this->report('primary-contacts')
+            ->assertJsonPath('props.report.rows.0.first_name', 'Pat')
+            ->assertJsonPath('props.report.rows.0.last_name', 'Primary')
+            ->assertJsonPath('props.report.rows.0.email', 'pat.primary@alpha.test');
+    }
+
     public function test_expiry_report_orders_by_soonest_expiry(): void
     {
         $this->institution('inst-a', 'Later', ['designation_expiry' => '2027-06-01']);

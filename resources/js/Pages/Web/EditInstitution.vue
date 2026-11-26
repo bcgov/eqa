@@ -7,6 +7,8 @@ const props = defineProps({
     institution: { type: Object, default: null },
     qaOptions: { type: Array, default: () => [] },
     canEditDli: { type: Boolean, default: false },
+    // Ministry only: business owner and primary contact (name + email).
+    canEditContacts: { type: Boolean, default: false },
     submitUrl: { type: String, default: '/web/institution' },
     cancelUrl: { type: String, default: '/web/institution' },
 })
@@ -46,6 +48,12 @@ const form = useForm({
     // Enrolment Type and International Students - Other are retired: not asked, never written.
     in_person_students: props.institution?.in_person_students ?? 0,
     online_students: props.institution?.online_students ?? 0,
+    // Only sent (and accepted) on the ministry's edit page.
+    ...(props.canEditContacts ? {
+        business_owner: props.institution?.business_owner ?? '',
+        primary_contact: props.institution?.primary_contact ?? '',
+        primary_contact_email: props.institution?.primary_contact_email ?? '',
+    } : {}),
 })
 
 function submit() {
@@ -89,6 +97,25 @@ function submit() {
                 </label>
                 <label class="block"><span class="text-sm text-slate-600">Web URL</span>
                     <input v-model="form.website" type="text" :class="inputClass" />
+                </label>
+            </div>
+        </section>
+
+        <section v-if="canEditContacts" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 class="mb-1 text-sm font-semibold text-slate-700">Business Owner &amp; Primary Contact</h2>
+            <p class="mb-4 text-xs text-slate-500">Maintained by the ministry. Notification emails to the institution go to the primary contact email when it is set (otherwise to the institution's portal administrator).</p>
+            <div class="grid gap-4 sm:grid-cols-2">
+                <label class="block sm:col-span-2"><span class="text-sm text-slate-600">Business Owner Name</span>
+                    <input v-model="form.business_owner" type="text" autocomplete="off" :class="inputClass" />
+                    <span v-if="form.errors.business_owner" class="mt-1 block text-xs text-red-600">{{ form.errors.business_owner }}</span>
+                </label>
+                <label class="block"><span class="text-sm text-slate-600">Primary Contact Name</span>
+                    <input v-model="form.primary_contact" type="text" autocomplete="off" :class="inputClass" />
+                    <span v-if="form.errors.primary_contact" class="mt-1 block text-xs text-red-600">{{ form.errors.primary_contact }}</span>
+                </label>
+                <label class="block"><span class="text-sm text-slate-600">Primary Contact Email</span>
+                    <input v-model="form.primary_contact_email" type="email" autocomplete="off" :class="inputClass" />
+                    <span v-if="form.errors.primary_contact_email" class="mt-1 block text-xs text-red-600">{{ form.errors.primary_contact_email }}</span>
                 </label>
             </div>
         </section>

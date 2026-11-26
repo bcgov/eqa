@@ -178,9 +178,17 @@ class ApplicationWorkflowController extends Controller
                     (string) ($data['compliance_order_notes'] ?? ''),
                 );
 
-                return back()->with('success', $invoice->invoice_status === 'Paid'
-                    ? 'Application approved. No administrative fee applies, so the designation has been granted.'
-                    : 'Application approved. Administrative fee invoice '.$invoice->invoice_number.' ($'.number_format((float) $invoice->total_charges, 2).') sent to the institution.');
+                $institution = DB::table('institutions')->where('crm_id', $application->institution_crm_id)->first();
+                $designated = ($institution->eqa_status ?? null) === 'Designated';
+                $response = back()->with('success', $invoice->invoice_status === 'Paid'
+                    ? 'Application approved. No administrative fee applies'.($designated ? ', so the designation has been granted.' : '.')
+                    : 'Application approved'.($designated ? ' and the institution is Designated' : '').'. Administrative fee invoice '.$invoice->invoice_number.' ($'.number_format((float) $invoice->total_charges, 2).') sent to the institution.');
+
+                if ($institution !== null && ! DesignationService::ptiruPermitsDesignation($institution->qa_met_through, $institution->ptib_standing)) {
+                    $response->with('error', 'The institution could not be Designated: its quality assurance is met through PTIRU Designation and its PTIRU Standing is not In Good Standing. Update the PTIRU Standing on the institution page, then set the EQA Status to Designated.');
+                }
+
+                return $response;
             case 'confirm_admin_fee':
             case 'confirm_appeal_fee':
                 $invoice = $fees->invoiceFor($crmId, $action === 'confirm_admin_fee' ? ApplicationFeeService::FEE_ADMIN_VARIABLE : ApplicationFeeService::FEE_APPEAL);

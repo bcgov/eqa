@@ -14,6 +14,9 @@ const form = useForm({
     province: '',
     postal_code: '',
     country: '',
+    business_owner: '',
+    primary_contact: '',
+    primary_contact_email: '',
 })
 
 function submit() {
@@ -77,6 +80,24 @@ function submit() {
                 <label class="block"><span class="text-sm text-slate-600">Country <span class="text-red-600">*</span></span>
                     <input v-model="form.country" type="text" :class="inputClass" />
                     <span v-if="form.errors.country" class="mt-1 block text-xs text-red-600">{{ form.errors.country }}</span>
+                </label>
+            </div>
+        </section>
+
+        <section class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 class="mb-4 text-sm font-semibold text-slate-700">Business Owner &amp; Primary Contact</h2>
+            <div class="grid gap-4 sm:grid-cols-2">
+                <label class="block sm:col-span-2"><span class="text-sm text-slate-600">Business Owner Name</span>
+                    <input v-model="form.business_owner" type="text" autocomplete="off" :class="inputClass" />
+                    <span v-if="form.errors.business_owner" class="mt-1 block text-xs text-red-600">{{ form.errors.business_owner }}</span>
+                </label>
+                <label class="block"><span class="text-sm text-slate-600">Primary Contact Name</span>
+                    <input v-model="form.primary_contact" type="text" autocomplete="off" :class="inputClass" />
+                    <span v-if="form.errors.primary_contact" class="mt-1 block text-xs text-red-600">{{ form.errors.primary_contact }}</span>
+                </label>
+                <label class="block"><span class="text-sm text-slate-600">Primary Contact Email</span>
+                    <input v-model="form.primary_contact_email" type="email" autocomplete="off" :class="inputClass" />
+                    <span v-if="form.errors.primary_contact_email" class="mt-1 block text-xs text-red-600">{{ form.errors.primary_contact_email }}</span>
                 </label>
             </div>
         </section>

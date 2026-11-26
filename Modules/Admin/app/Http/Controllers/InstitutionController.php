@@ -95,6 +95,9 @@ class InstitutionController extends Controller
             'province' => ['required', 'string', 'max:100'],
             'postal_code' => ['required', 'string', 'max:20'],
             'country' => ['required', 'string', 'max:100'],
+            'business_owner' => ['nullable', 'string', 'max:255'],
+            'primary_contact' => ['nullable', 'string', 'max:255'],
+            'primary_contact_email' => ['nullable', 'email', 'max:255'],
         ]);
 
         $crmId = (string) Str::uuid();
@@ -127,6 +130,8 @@ class InstitutionController extends Controller
                 'Languages Canada Accreditation',
             ],
             'canEditDli' => true,
+            // Business owner and primary contact are maintained by the ministry, not the institution.
+            'canEditContacts' => true,
             'submitUrl' => "/admin/institutions/{$crmId}",
             'cancelUrl' => "/admin/institutions/{$crmId}",
         ]);
@@ -156,6 +161,9 @@ class InstitutionController extends Controller
             'in_person_students' => ['nullable', 'integer', 'min:0'],
             'online_students' => ['nullable', 'integer', 'min:0'],
             // enrolment_type is retired too (Total Institution Enrolment's help says FTE or headcount).
+            'business_owner' => ['nullable', 'string', 'max:255'],
+            'primary_contact' => ['nullable', 'string', 'max:255'],
+            'primary_contact_email' => ['nullable', 'email', 'max:255'],
         ]);
 
         DB::table('institutions')->where('crm_id', $crmId)->update($data);

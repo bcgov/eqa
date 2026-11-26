@@ -4,6 +4,7 @@ import { ref, computed, watch } from 'vue'
 import ManualPaymentForm from '../../Components/ManualPaymentForm.vue'
 import ApplicationLocationsSummary from '../../Components/ApplicationLocationsSummary.vue'
 import WebsiteComplianceSummary from '../../Components/WebsiteComplianceSummary.vue'
+import { affirmations } from '../../applicationAffirmations'
 
 const props = defineProps({
     application: { type: Object, default: () => ({}) },
@@ -527,14 +528,14 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
         </div>
 
         <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 class="mb-3 text-sm font-semibold text-slate-700">Affirmations</h2>
-            <div class="space-y-2 text-sm text-slate-700">
-                <label class="flex items-start gap-2"><input type="checkbox" v-model="form.affirm_policy_manual" :disabled="locked" class="mt-0.5 rounded"> Read and understood the <em>Post-Secondary International Education (Designated Institutions) Act</em>, Regulations and Administrator’s Rules</label>
-                <label class="flex items-start gap-2"><input type="checkbox" v-model="form.affirm_website_compliance" :disabled="locked" class="mt-0.5 rounded"> Institution's website is in compliance with the Act, Regulations and Administrator’s Rules</label>
-                <label class="flex items-start gap-2"><input type="checkbox" v-model="form.affirm_written_permission" :disabled="locked" class="mt-0.5 rounded"> Institutions require the written permission of the Ministry to use the designation mark</label>
-                <label class="flex items-start gap-2"><input type="checkbox" v-model="form.affirm_authorized" :disabled="locked" class="mt-0.5 rounded"> I am the person assigned by my organization, authorized to submit the application</label>
+            <h2 class="mb-3 text-sm font-semibold text-slate-700">I have read and understand the conditions of use pertaining to the following:</h2>
+            <div class="space-y-3 text-sm text-slate-700">
+                <label v-for="[field, parts] in affirmations" :key="field" class="flex items-start gap-2">
+                    <input type="checkbox" v-model="form[field]" :disabled="locked" class="mt-0.5 shrink-0 rounded">
+                    <span><template v-for="([text, italic], k) in parts" :key="k"><em v-if="italic">{{ text }}</em><template v-else>{{ text }}</template></template></span>
+                </label>
             </div>
-            <label class="mt-3 block text-sm sm:max-w-sm"><span class="text-slate-500">Institution Representative Signature</span>
+            <label class="mt-3 block text-sm sm:max-w-sm"><span class="text-slate-500">Institutional Representative Signature</span>
                 <input type="text" v-model="form.representative_signature" :disabled="locked" :class="inputClass" />
             </label>
         </div>

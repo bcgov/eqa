@@ -216,7 +216,7 @@ class ReportController extends Controller
 
     private function contactsReport(): array
     {
-        $institutions = $this->designated()->get(['crm_id', 'name', 'primary_contact']);
+        $institutions = $this->designated()->get(['crm_id', 'name', 'primary_contact', 'primary_contact_email']);
         $contacts = $this->primaryContacts($institutions);
 
         return [
@@ -319,7 +319,8 @@ class ReportController extends Controller
                 'first_name' => $first,
                 'last_name' => $last,
                 'job_title' => trim((string) ($user->job_title ?? '')),
-                'email' => trim((string) ($user->email ?? '')),
+                // The primary contact email recorded by the ministry wins over the portal user's.
+                'email' => trim((string) ($institution->primary_contact_email ?? '')) ?: trim((string) ($user->email ?? '')),
             ];
         }
 

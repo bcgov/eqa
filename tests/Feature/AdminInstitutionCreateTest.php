@@ -82,6 +82,47 @@ class AdminInstitutionCreateTest extends TestCase
         $this->assertSame(0, DB::table('institutions')->count());
     }
 
+    public function test_ministry_sets_the_business_owner_and_primary_contact_on_create_and_edit(): void
+    {
+        $admin = $this->asMinistry();
+        $admin->post('/admin/institutions', $this->validForm([
+            'business_owner' => 'Olive Owner', 'primary_contact' => 'Pat Primary', 'primary_contact_email' => 'pat@new.example',
+        ]))->assertSessionHas('success');
+        $institution = DB::table('institutions')->where('name', 'New College')->first();
+        $this->assertSame('Olive Owner', $institution->business_owner);
+        $this->assertSame('Pat Primary', $institution->primary_contact);
+        $this->assertSame('pat@new.example', $institution->primary_contact_email);
+
+        $admin->put("/admin/institutions/{$institution->crm_id}", [
+            'name' => 'New College', 'primary_contact_email' => 'not-an-email',
+        ])->assertSessionHasErrors('primary_contact_email');
+
+        $admin->put("/admin/institutions/{$institution->crm_id}", [
+            'name' => 'New College', 'business_owner' => 'Owen Owner', 'primary_contact' => 'Robin Contact', 'primary_contact_email' => 'robin@new.example',
+        ])->assertSessionHas('success');
+        $institution = DB::table('institutions')->where('crm_id', $institution->crm_id)->first();
+        $this->assertSame('Owen Owner', $institution->business_owner);
+        $this->assertSame('Robin Contact', $institution->primary_contact);
+        $this->assertSame('robin@new.example', $institution->primary_contact_email);
+    }
+
+    public function test_institutions_cannot_change_their_business_owner_or_primary_contact(): void
+    {
+        $crmId = (string) Str::uuid();
+        DB::table('institutions')->insert(['crm_id' => $crmId, 'name' => 'Own College', 'business_owner' => 'Olive Owner', 'primary_contact' => 'Pat Primary', 'primary_contact_email' => 'pat@own.example']);
+        $user = User::create(['name' => 'inst@own.example', 'email' => 'inst@own.example', 'password' => Str::random(32)]);
+        $user->roles()->attach(Role::where('name', Role::INSTITUTION_ADMIN)->value('id'));
+
+        $this->actingAs($user)->withSession(['portal_institution' => $crmId, 'portal_role' => 'institution'])
+            ->put('/web/institution', ['name' => 'Own College', 'business_owner' => 'Someone Else', 'primary_contact' => 'X', 'primary_contact_email' => 'x@own.example'])
+            ->assertRedirect();
+
+        $institution = DB::table('institutions')->where('crm_id', $crmId)->first();
+        $this->assertSame('Olive Owner', $institution->business_owner);
+        $this->assertSame('Pat Primary', $institution->primary_contact);
+        $this->assertSame('pat@own.example', $institution->primary_contact_email);
+    }
+
     /** @param  array<string, mixed>  $overrides */
     private function validForm(array $overrides = []): array
     {

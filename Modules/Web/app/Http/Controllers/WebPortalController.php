@@ -845,6 +845,8 @@ class WebPortalController extends Controller
         foreach (self::APPLICATION_FLAGS as $flag) {
             $rules[$flag] = ['nullable', 'boolean'];
         }
+        // "Institution is currently in compliance with BC Registry Services ..." must be confirmed to submit.
+        $rules['annual_report_filed'] = $complete ? ['accepted'] : ['nullable', 'boolean'];
         foreach (self::APPLICATION_AFFIRMATIONS as $affirmation) {
             $rules[$affirmation] = $complete ? ['accepted'] : ['nullable', 'boolean'];
         }
@@ -871,6 +873,7 @@ class WebPortalController extends Controller
             'service_postal_code.required' => 'Enter the postal code for service.',
             'service_country.required' => 'Enter the country for service.',
             'service_address_confirmed.accepted' => 'Confirm the address for service.',
+            'annual_report_filed.accepted' => 'Confirm the institution is in compliance with BC Registry Services and up to date on filing of annual reports.',
             'per_student_fee_enrolment.required' => 'Enter the number of international students for the per student fee.',
             'per_student_fee_enrolment.integer' => 'Enter a whole number.',
             'representative_signature.required' => 'Enter the institutional representative signature.',
