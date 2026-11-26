@@ -18,8 +18,9 @@ use Illuminate\Support\Facades\DB;
  *    Designated and the designation start/expiry dates are stamped. [application -> institution]
  *  - Declining a re-application de-designates a Designated institution
  *    (De-Designated, dated today); a never-designated applicant becomes Not
- *    Approved. A designation whose expiry passes without an approved renewal is
- *    de-designated by the daily deadline job.          [application -> institution]
+ *    Approved.                                          [application -> institution]
+ *  - The designation expiry date does not de-designate on its own: the institution stays
+ *    Designated until an application is declined or the ministry changes it.
  *
  * EQA / PTIRU Standing (and the application's "in Good Standing" copies) are retired:
  * not shown, never written, and they no longer gate designation.
@@ -182,30 +183,10 @@ class DesignationService
     }
 
     /**
-     * Daily sweep: a Designated institution whose designation expiry has passed is
-     * De-Designated (dated today) unless a renewal carries it forward: an application approved
-     * with an expiry still ahead, or one past the approve decision and going through its
-     * administrative fee (Fee Required to Pending Approval). Returns the number de-designated.
+     * A designation does not lapse on its expiry date: the institution stays Designated until an
+     * application is declined or the ministry changes its EQA Status (a renewal applied for on
+     * the last day may not be processed in time).
      */
-    public function deDesignateLapsed(): int
-    {
-        $today = self::today();
-
-        return DB::table('institutions')
-            ->where('eqa_status', 'Designated')
-            ->whereNotNull('designation_expiry')
-            ->where('designation_expiry', '<', $today)
-            ->whereNotExists(function ($q) use ($today): void {
-                $q->select(DB::raw(1))
-                    ->from('applications as a')
-                    ->whereColumn('a.institution_crm_id', 'institutions.crm_id')
-                    ->where(fn ($w) => $w->where('a.status', 'like', 'Approved%')
-                        ->orWhereIn('a.workflow_stage', ['admin_fee', 'admin_fee_paid', 'application_approval']))
-                    ->where('a.designation_expiry', '>=', $today);
-            })
-            ->update(['eqa_status' => 'De-Designated', 'de_designated_date' => $today]);
-    }
-
     private static function today(): string
     {
         return Carbon::now('America/Vancouver')->toDateString();

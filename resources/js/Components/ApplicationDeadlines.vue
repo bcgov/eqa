@@ -29,7 +29,7 @@ function timeLeft(d) {
     const ms = new Date(d.applies_at).getTime() - now.value
     if (ms <= 0) {
         return d.active
-            ? { text: d.applied_by.startsWith('Immediately') ? 'Passed' : 'Passed — applied at the next run', tone: 'text-red-700 font-semibold' }
+            ? { text: d.mode === 'job' ? 'Passed — applied at the next run' : 'Passed', tone: d.mode === 'none' ? 'text-amber-700 font-semibold' : 'text-red-700 font-semibold' }
             : { text: 'Passed', tone: 'text-slate-500' }
     }
     const minutes = Math.floor(ms / 60000)
@@ -93,7 +93,7 @@ function runNow() {
                         <td class="whitespace-nowrap py-2 pr-4 text-xs" :class="timeLeft(d).tone">{{ timeLeft(d).text }}</td>
                         <td class="py-2 pr-4 text-xs" :class="d.active ? 'text-slate-600' : ''">
                             {{ d.outcome }}
-                            <span class="block" :class="d.active ? 'text-slate-500' : ''">{{ d.applied_by }}<template v-if="d.applies_at && !d.applied_by.startsWith('Immediately')">: {{ when(d.applies_at) }}</template></span>
+                            <span class="block" :class="d.active ? 'text-slate-500' : ''">{{ d.applied_by }}<template v-if="d.applies_at && d.mode === 'job'">: {{ when(d.applies_at) }}</template></span>
                         </td>
                         <td v-if="canManage" class="whitespace-nowrap py-2">
                             <form v-if="d.editable" class="flex items-center gap-2" @submit.prevent="save(d)">

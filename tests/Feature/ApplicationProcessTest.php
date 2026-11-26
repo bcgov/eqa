@@ -926,38 +926,20 @@ class ApplicationProcessTest extends TestCase
         $this->assertSame($this->vancouverDate(0), $this->institution()->de_designated_date);
     }
 
-    public function test_daily_job_de_designates_a_lapsed_designation(): void
+    public function test_designation_expiry_passing_does_not_de_designate_the_institution(): void
     {
         DB::table('institutions')->where('crm_id', self::INSTITUTION)->update([
             'eqa_status' => 'Designated', 'designation_start' => '2020-04-01', 'designation_expiry' => $this->vancouverDate(0),
         ]);
+        // A renewal applied for on the last day, still being reviewed when the date passes.
+        $renewal = $this->applicationAt('under_review');
 
+        $this->travel(40)->days();
         $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
-        $this->assertSame('Designated', $this->institution()->eqa_status, 'Still designated on its expiry date.');
 
-        $this->travel(1)->days();
-        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
-
-        $this->assertSame('De-Designated', $this->institution()->eqa_status);
-        $this->assertSame($this->vancouverDate(0), $this->institution()->de_designated_date);
-    }
-
-    public function test_renewal_awaiting_its_administrative_fee_holds_the_designation_until_the_fee_expires(): void
-    {
-        DB::table('institutions')->where('crm_id', self::INSTITUTION)->update([
-            'eqa_status' => 'Designated', 'designation_start' => '2020-04-01', 'designation_expiry' => $this->vancouverDate(-1),
-        ]);
-        $id = $this->applicationAt('under_review');
-        $this->advance($id, 'eligible');
-
-        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
         $this->assertSame('Designated', $this->institution()->eqa_status);
-
-        $this->travel(31)->days();
-        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
-
-        $this->assertSame('Expired', $this->application($id)->status);
-        $this->assertSame('De-Designated', $this->institution()->eqa_status);
+        $this->assertNull($this->institution()->de_designated_date);
+        $this->assertSame('under_review', $this->application($renewal)->workflow_stage);
     }
 
     public function test_a_new_application_can_start_after_a_decline_is_final(): void

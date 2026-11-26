@@ -22,9 +22,9 @@ Schedule::command('eqa:reconcile-payments')
     ->everyFifteenMinutes()
     ->withoutOverlapping();
 
-// Expire applications past their admin fee / appeal fee deadline; flag missed change-request
-// deadlines as Pending Admin Confirm Expiry for the ministry to confirm or extend; de-designate
-// institutions whose designation expiry passed without an approved renewal.
+// Expire applications past their completion / admin fee / appeal fee deadline; flag missed
+// change-request deadlines as Pending Admin Confirm Expiry for the ministry to confirm or extend.
+// (A designation expiry date does not de-designate the institution.)
 Schedule::command('eqa:enforce-deadlines')
     ->dailyAt(ApplicationFeeService::DEADLINE_JOB_TIME)
     ->timezone('America/Vancouver')

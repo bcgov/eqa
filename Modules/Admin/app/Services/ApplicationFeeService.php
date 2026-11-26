@@ -556,7 +556,7 @@ class ApplicationFeeService
      * running at the current stage (only those can be changed), what happens when it passes and
      * when that is applied (the daily job runs the day after the due date at DEADLINE_JOB_TIME).
      *
-     * @return list<array{key: string, label: string, date: ?string, active: bool, editable: bool, outcome: string, applies_at: ?string, applied_by: string, note: ?string}>
+     * @return list<array{key: string, label: string, date: ?string, active: bool, editable: bool, outcome: string, applies_at: ?string, applied_by: string, mode: string, note: ?string}>
      */
     public function deadlines(object $application): array
     {
@@ -588,22 +588,26 @@ class ApplicationFeeService
                 $stage === 'admin_fee', 'The application expires (Expired).', $job),
             $this->deadline('appeal', $appealPaying ? 'Appeal fee payment (appeal deadline)' : 'Appeal window', $appeal,
                 $appealOpen, $appealPaying ? 'The appeal lapses and the decline stands (Declined).' : 'The Appeal Decision button is no longer shown.',
-                $appealPaying ? $job : 'Immediately (checked when the institution opens the application)', null, ! $appealPaying),
+                $appealPaying ? $job : 'Immediately (checked when the institution opens the application)', null, $appealPaying ? 'job' : 'immediate'),
             array_merge($this->deadline('designation', 'Institution designation expiry', $date($institution->designation_expiry ?? null),
-                $designated, 'The institution is De-Designated unless an approved renewal (or one going through its administrative fee) carries it.', $job,
-                'Renewal reminders are emailed 90 and 30 days before (07:00 notification job). Change this date on the institution page.'), ['editable' => false]),
+                $designated, 'No automatic change: the institution stays Designated until an application is declined or the ministry changes its EQA Status.',
+                'Not enforced by a job', 'The institution should apply for renewal before this date. Renewal reminders are emailed 90 and 30 days before (07:00 notification job). Change this date on the institution page.', 'none'),
+                ['editable' => false]),
         ];
     }
 
-    /** @return array{key: string, label: string, date: ?string, active: bool, editable: bool, outcome: string, applies_at: ?string, applied_by: string, note: ?string} */
-    private function deadline(string $key, string $label, ?string $date, bool $active, string $outcome, string $appliedBy, ?string $note = null, bool $immediate = false): array
+    /**
+     * @param  'job'|'immediate'|'none'  $mode  how a passed deadline takes effect
+     * @return array{key: string, label: string, date: ?string, active: bool, editable: bool, outcome: string, applies_at: ?string, applied_by: string, mode: string, note: ?string}
+     */
+    private function deadline(string $key, string $label, ?string $date, bool $active, string $outcome, string $appliedBy, ?string $note = null, string $mode = 'job'): array
     {
         $appliesAt = null;
         if ($date !== null) {
             // A deadline is met through the whole due date; the daily job acts on it the next day.
-            $appliesAt = $immediate
-                ? Carbon::parse($date, 'America/Vancouver')->addDay()->startOfDay()->toIso8601String()
-                : Carbon::parse($date.' '.self::DEADLINE_JOB_TIME, 'America/Vancouver')->addDay()->toIso8601String();
+            $appliesAt = $mode === 'job'
+                ? Carbon::parse($date.' '.self::DEADLINE_JOB_TIME, 'America/Vancouver')->addDay()->toIso8601String()
+                : Carbon::parse($date, 'America/Vancouver')->addDay()->startOfDay()->toIso8601String();
         }
 
         return [
@@ -615,6 +619,7 @@ class ApplicationFeeService
             'outcome' => $outcome,
             'applies_at' => $appliesAt,
             'applied_by' => $appliedBy,
+            'mode' => $mode,
             'note' => $note,
         ];
     }
@@ -827,17 +832,15 @@ class ApplicationFeeService
     /**
      * Expire applications whose deadline passed: unpaid admin fee, unpaid appeal fee (the original
      * decline stands). An unanswered change request becomes Pending Admin Confirm Expiry instead.
-     * Finally, Designated institutions whose designation lapsed without an approved renewal are
-     * De-Designated (after the admin-fee expiry, so an unpaid approval no longer carries them).
      * Drafts and unpaid applications past their completion deadline expire, and those nearing it
-     * are sent a reminder.
+     * are sent a reminder. (A designation expiry date does not de-designate the institution.)
      *
-     * @return array{admin_fee: int, changes: int, appeal: int, lapsed: int, incomplete: int, reminders: int}
+     * @return array{admin_fee: int, changes: int, appeal: int, incomplete: int, reminders: int}
      */
     public function enforceDeadlines(): array
     {
         $today = $this->today();
-        $counts = ['admin_fee' => 0, 'changes' => 0, 'appeal' => 0, 'lapsed' => 0, 'incomplete' => 0, 'reminders' => 0];
+        $counts = ['admin_fee' => 0, 'changes' => 0, 'appeal' => 0, 'incomplete' => 0, 'reminders' => 0];
 
         foreach ([['admin_fee', self::FEE_ADMIN_VARIABLE], ['appeal_payment', self::FEE_APPEAL]] as [$stage, $feeType]) {
             $overdue = DB::table('applications as a')
@@ -871,7 +874,6 @@ class ApplicationFeeService
             ->where('changes_due_date', '<', $today)
             ->update(['workflow_stage' => 'pending_expiry', 'status' => self::STATUS_PENDING_EXPIRY]);
 
-        $counts['lapsed'] = $this->designation->deDesignateLapsed();
         $counts['incomplete'] = $this->expireIncompleteApplications($today);
         $counts['reminders'] = $this->sendCompletionReminders($today);
 

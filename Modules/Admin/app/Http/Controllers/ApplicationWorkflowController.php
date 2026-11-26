@@ -171,8 +171,8 @@ class ApplicationWorkflowController extends Controller
         Log::info('Deadline checks run by hand', ['by' => $request->user()?->email, 'counts' => $counts]);
 
         return back()->with('success', sprintf(
-            'Deadline checks run for all applications: %d incomplete application(s) expired, %d completion reminder(s) sent, %d administrative fee(s) expired, %d appeal(s) lapsed, %d resubmission(s) awaiting expiry confirmation, %d designation(s) lapsed.',
-            $counts['incomplete'], $counts['reminders'], $counts['admin_fee'], $counts['appeal'], $counts['changes'], $counts['lapsed'],
+            'Deadline checks run for all applications: %d incomplete application(s) expired, %d completion reminder(s) sent, %d administrative fee(s) expired, %d appeal(s) lapsed, %d resubmission(s) awaiting expiry confirmation.',
+            $counts['incomplete'], $counts['reminders'], $counts['admin_fee'], $counts['appeal'], $counts['changes'],
         ));
     }
 
