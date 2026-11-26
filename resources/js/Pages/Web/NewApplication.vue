@@ -230,7 +230,7 @@ function save(intent) {
 
         <h1 class="text-2xl font-bold text-slate-800">{{ application ? 'Edit EQA Application' : 'New EQA Application' }}</h1>
         <p v-if="institution" class="mt-1 text-sm text-slate-500">for {{ institution.name }} <span class="font-mono text-slate-400">{{ institution.institution_number }}</span></p>
-        <p class="mt-1 text-sm text-slate-500">Move between the steps in any order. Select <span class="font-medium">Save Draft</span> at any time to keep your progress, and <span class="font-medium">{{ resubmitting ? 'Resubmit' : 'Submit' }} Application</span> on the last step when every step is complete.</p>
+        <p class="mt-1 text-sm text-slate-500">Move between the steps in any order. Select <span class="font-medium">Save Draft</span> at any time to keep your progress, and <span class="font-medium">{{ resubmitting ? 'Resubmit' : 'Submit' }} Application</span> on the last step when every step is complete. Fields marked <span class="text-red-600" aria-hidden="true">*</span><span class="sr-only">with an asterisk</span> are required before you can submit.</p>
 
         <div v-if="flash.success" class="mt-4 rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700" role="status">{{ flash.success }}</div>
         <div v-if="flash.error" class="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700" role="alert">{{ flash.error }}</div>
@@ -308,7 +308,7 @@ function save(intent) {
                         <div class="grid gap-3 sm:grid-cols-2">
                             <label v-for="[field, label, required, span] in locationFields" :key="field" class="block" :class="span">
                                 <span class="text-sm text-slate-600">{{ label }}<span v-if="required" class="text-red-600"> *</span></span>
-                                <input v-model="l[field]" :type="field === 'email' ? 'email' : 'text'" :class="inputClass" />
+                                <input v-model="l[field]" :aria-required="required ? 'true' : undefined" :type="field === 'email' ? 'email' : 'text'" :class="inputClass" />
                                 <span v-if="locationError(i, field)" class="mt-1 block text-xs text-red-600">{{ locationError(i, field) }}</span>
                             </label>
                         </div>
@@ -326,31 +326,31 @@ function save(intent) {
                     <p class="mb-2 text-xs text-slate-500">Prefilled from your institution profile. Update it here if this application's address for service is different.</p>
                     <div class="grid gap-4 sm:grid-cols-2">
                         <label class="block sm:col-span-2"><span class="text-sm text-slate-600">Street Address <span class="text-red-600">*</span></span>
-                            <input v-model="form.service_street1" type="text" autocomplete="address-line1" :class="inputClass" />
+                            <input v-model="form.service_street1" aria-required="true" type="text" autocomplete="address-line1" :class="inputClass" />
                             <span v-if="form.errors.service_street1" class="mt-1 block text-xs text-red-600">{{ form.errors.service_street1 }}</span>
                         </label>
                         <label class="block sm:col-span-2"><span class="text-sm text-slate-600">Street Address Line 2</span>
                             <input v-model="form.service_street2" type="text" autocomplete="address-line2" :class="inputClass" />
                         </label>
                         <label class="block"><span class="text-sm text-slate-600">City <span class="text-red-600">*</span></span>
-                            <input v-model="form.service_city" type="text" autocomplete="address-level2" :class="inputClass" />
+                            <input v-model="form.service_city" aria-required="true" type="text" autocomplete="address-level2" :class="inputClass" />
                             <span v-if="form.errors.service_city" class="mt-1 block text-xs text-red-600">{{ form.errors.service_city }}</span>
                         </label>
                         <label class="block"><span class="text-sm text-slate-600">Province <span class="text-red-600">*</span></span>
-                            <input v-model="form.service_province" type="text" autocomplete="address-level1" :class="inputClass" />
+                            <input v-model="form.service_province" aria-required="true" type="text" autocomplete="address-level1" :class="inputClass" />
                             <span v-if="form.errors.service_province" class="mt-1 block text-xs text-red-600">{{ form.errors.service_province }}</span>
                         </label>
                         <label class="block"><span class="text-sm text-slate-600">Postal Code <span class="text-red-600">*</span></span>
-                            <input v-model="form.service_postal_code" type="text" autocomplete="postal-code" :class="inputClass" />
+                            <input v-model="form.service_postal_code" aria-required="true" type="text" autocomplete="postal-code" :class="inputClass" />
                             <span v-if="form.errors.service_postal_code" class="mt-1 block text-xs text-red-600">{{ form.errors.service_postal_code }}</span>
                         </label>
                         <label class="block"><span class="text-sm text-slate-600">Country <span class="text-red-600">*</span></span>
-                            <input v-model="form.service_country" type="text" autocomplete="country-name" :class="inputClass" />
+                            <input v-model="form.service_country" aria-required="true" type="text" autocomplete="country-name" :class="inputClass" />
                             <span v-if="form.errors.service_country" class="mt-1 block text-xs text-red-600">{{ form.errors.service_country }}</span>
                         </label>
                     </div>
                     <label class="mt-3 flex items-start gap-2 text-sm text-slate-700">
-                        <input type="checkbox" v-model="form.service_address_confirmed" class="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600" />
+                        <input type="checkbox" v-model="form.service_address_confirmed" aria-required="true" class="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600" />
                         <span>I confirm this is the institution's address for service. <span class="text-red-600">*</span></span>
                     </label>
                     <p v-if="form.errors.service_address_confirmed" class="mt-1 text-xs text-red-600">{{ form.errors.service_address_confirmed }}</p>
@@ -361,12 +361,12 @@ function save(intent) {
                     <p class="mb-2 text-xs text-slate-500">List any other names the institution operated under in the last 5 years and the dates each was used. Leave "Used To" blank if the name is still in use.</p>
                     <div v-for="(n, i) in form.previous_names" :key="i" class="mb-3 rounded-md border border-slate-200 p-3">
                         <div class="grid gap-3 sm:grid-cols-[1fr_10rem_10rem_auto] sm:items-start">
-                            <label class="block"><span class="text-sm text-slate-600">Name</span>
-                                <input v-model="n.name" type="text" :class="inputClass" />
+                            <label class="block"><span class="text-sm text-slate-600">Name<span class="text-red-600"> *</span></span>
+                                <input v-model="n.name" aria-required="true" type="text" :class="inputClass" />
                                 <span v-if="nameError(i, 'name')" class="mt-1 block text-xs text-red-600">{{ nameError(i, 'name') }}</span>
                             </label>
-                            <label class="block"><span class="text-sm text-slate-600">Used From</span>
-                                <input v-model="n.used_from" type="date" :max="today" :class="inputClass" />
+                            <label class="block"><span class="text-sm text-slate-600">Used From<span class="text-red-600"> *</span></span>
+                                <input v-model="n.used_from" aria-required="true" type="date" :max="today" :class="inputClass" />
                                 <span v-if="nameError(i, 'used_from')" class="mt-1 block text-xs text-red-600">{{ nameError(i, 'used_from') }}</span>
                             </label>
                             <label class="block"><span class="text-sm text-slate-600">Used To</span>
@@ -470,7 +470,7 @@ function save(intent) {
             <section class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
                 <div class="block sm:max-w-sm"><label for="app-per_student_fee_enrolment" class="text-sm font-semibold text-slate-700">Per Student Fee Payment Enrollment <span class="text-red-600">*</span></label>
                     <InfoTooltip class="ml-1" title="Per Student Fee Payment Enrollment" :text="help.per_student_fee_enrolment" />
-                    <input id="app-per_student_fee_enrolment" v-model="form.per_student_fee_enrolment" type="number" min="0" step="1" inputmode="numeric" :class="inputClass" />
+                    <input id="app-per_student_fee_enrolment" aria-required="true" v-model="form.per_student_fee_enrolment" type="number" min="0" step="1" inputmode="numeric" :class="inputClass" />
                     <span v-if="form.errors.per_student_fee_enrolment" class="mt-1 block text-xs text-red-600">{{ form.errors.per_student_fee_enrolment }}</span>
                 </div>
             </section>
@@ -482,15 +482,15 @@ function save(intent) {
                 <ul class="space-y-3 text-sm">
                     <li v-for="[field, parts] in affirmations" :key="field">
                         <label class="flex items-start gap-2">
-                            <input type="checkbox" v-model="form[field]" class="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600" />
-                            <span class="text-slate-700"><template v-for="([text, italic], k) in parts" :key="k"><em v-if="italic">{{ text }}</em><template v-else>{{ text }}</template></template></span>
+                            <input type="checkbox" v-model="form[field]" aria-required="true" class="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600" />
+                            <span class="text-slate-700"><template v-for="([text, italic], k) in parts" :key="k"><em v-if="italic">{{ text }}</em><template v-else>{{ text }}</template></template><span class="text-red-600"> *</span></span>
                         </label>
                         <p v-if="form.errors[field]" class="ml-6 mt-1 text-xs text-red-600">{{ form.errors[field] }}</p>
                     </li>
                 </ul>
 
-                <label class="mt-4 block"><span class="text-sm text-slate-600">Institutional Representative Signature</span>
-                    <input v-model="form.representative_signature" type="text" :class="inputClass" />
+                <label class="mt-4 block"><span class="text-sm text-slate-600">Institutional Representative Signature<span class="text-red-600"> *</span></span>
+                    <input v-model="form.representative_signature" aria-required="true" type="text" :class="inputClass" />
                     <span v-if="form.errors.representative_signature" class="mt-1 block text-xs text-red-600">{{ form.errors.representative_signature }}</span>
                 </label>
             </section>
