@@ -196,8 +196,8 @@ class ProcessNotifier
 
     // ---------------------------------------------------------------------
     // Application approved (to the institution contact) — "Application Approval
-    // Notification" workflow. Declines and appeal outcomes are not emailed: the
-    // institution receives a formal letter outside the system.
+    // Notification" workflow. Declines and appeal outcomes are not emailed, and nor is
+    // an approval after an overturned appeal: the institution receives a formal letter.
     // ---------------------------------------------------------------------
 
     /** @param array<string, mixed> $extra */
@@ -248,18 +248,17 @@ class ProcessNotifier
         ], $contact['email'] ?: null, ['institution_crm_id' => $institution->crm_id ?? null]);
     }
 
-    /** Approval decision with the admin variable fee invoice (designation follows payment). */
-    public function approvedFeeDue(object $institution, object $application, object $invoice, bool $complianceOrder, string $complianceNotes): void
+    /**
+     * Approve decision: the administrative fee invoice is due (status Fee Required). The approval
+     * decision itself follows the confirmed payment. (Template key kept from the earlier flow.)
+     */
+    public function adminFeeRequired(object $institution, object $application, object $invoice): void
     {
         $contact = $this->contact($institution);
         $this->emails->send('application_approved_fee_due', [
             'contact_name' => $contact['name'] !== '' ? $contact['name'] : 'Applicant',
             'institution_name' => (string) ($institution->name ?? ''),
             'application_reference' => (string) ($application->reference ?? ''),
-            'approved_date' => (string) ($application->approved_date ?? ''),
-            'compliance_order' => $complianceOrder
-                ? 'This approval is issued under a compliance order: '.($complianceNotes !== '' ? $complianceNotes : 'see the EQA portal for details.')
-                : '',
             'invoice_number' => (string) ($invoice->invoice_number ?? ''),
             'admin_fee' => '$'.number_format((float) ($invoice->total_charges ?? 0), 2),
             'invoice_description' => (string) ($invoice->description ?? ''),

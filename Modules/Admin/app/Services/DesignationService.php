@@ -13,10 +13,10 @@ use Illuminate\Support\Facades\DB;
  * form. An institution's Designated status (EQA Status) is tightly coupled to its
  * application(s):
  *
- *  - Approving an application (Designation Decision = Approved) designates the
- *    institution: EQA Status = Designated and the designation start/expiry dates
- *    are stamped.                                        [application -> institution]
- *  - Not approving a re-application de-designates a Designated institution
+ *  - Approving an application (Designation Decision = Approved, recorded once its
+ *    administrative fee is paid and confirmed) designates the institution: EQA Status =
+ *    Designated and the designation start/expiry dates are stamped. [application -> institution]
+ *  - Declining a re-application de-designates a Designated institution
  *    (De-Designated, dated today); a never-designated applicant becomes Not
  *    Approved. A designation whose expiry passes without an approved renewal is
  *    de-designated by the daily deadline job.          [application -> institution]
@@ -117,34 +117,9 @@ class DesignationService
     }
 
     /**
-     * The ministry approved an application of an institution that is not currently Designated (a
-     * first-time applicant, or one re-applying after a decline or de-designation): it is Designated
-     * now, without waiting for the administrative fee. Its previous EQA Status is kept on the
-     * application so an unpaid fee can undo it. Returns whether the institution is now Designated.
-     */
-    public function designateOnApproval(object $application, string $approvedDate, ?string $designationExpiry): bool
-    {
-        $institution = empty($application->institution_crm_id)
-            ? null
-            : DB::table('institutions')->where('crm_id', $application->institution_crm_id)->first();
-        if ($institution === null) {
-            return false;
-        }
-        if ($institution->eqa_status === 'Designated') {
-            return true;
-        }
-
-        if (! $this->onApplicationApproved($application, $approvedDate, $designationExpiry)) {
-            return false;
-        }
-        DB::table('applications')->where('crm_id', $application->crm_id)->update(['prior_eqa_status' => $institution->eqa_status ?: 'Pending']);
-
-        return true;
-    }
-
-    /**
-     * The administrative fee of an application that designated the institution on approval was never
-     * paid: the institution goes back to not designated (Not Approved for a first-time applicant).
+     * An application designated its institution on approval under the earlier flow (before the
+     * administrative fee moved ahead of the approval) but the fee was never paid: the institution
+     * goes back to not designated (Not Approved for a first-time applicant).
      */
     public function undoDesignationOnApproval(object $application): void
     {
@@ -208,9 +183,9 @@ class DesignationService
 
     /**
      * Daily sweep: a Designated institution whose designation expiry has passed is
-     * De-Designated (dated today) unless an approved renewal carries it forward, i.e.
-     * an application approved with an expiry still ahead (including one awaiting its
-     * administrative fee). Returns the number of institutions de-designated.
+     * De-Designated (dated today) unless a renewal carries it forward: an application approved
+     * with an expiry still ahead, or one past the approve decision and going through its
+     * administrative fee (Fee Required to Pending Approval). Returns the number de-designated.
      */
     public function deDesignateLapsed(): int
     {
@@ -224,7 +199,8 @@ class DesignationService
                 $q->select(DB::raw(1))
                     ->from('applications as a')
                     ->whereColumn('a.institution_crm_id', 'institutions.crm_id')
-                    ->where('a.status', 'like', 'Approved%')
+                    ->where(fn ($w) => $w->where('a.status', 'like', 'Approved%')
+                        ->orWhereIn('a.workflow_stage', ['admin_fee', 'admin_fee_paid', 'application_approval']))
                     ->where('a.designation_expiry', '>=', $today);
             })
             ->update(['eqa_status' => 'De-Designated', 'de_designated_date' => $today]);

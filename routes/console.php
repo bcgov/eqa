@@ -3,6 +3,7 @@
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
+use Modules\Admin\Services\ApplicationFeeService;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -25,6 +26,6 @@ Schedule::command('eqa:reconcile-payments')
 // deadlines as Pending Admin Confirm Expiry for the ministry to confirm or extend; de-designate
 // institutions whose designation expiry passed without an approved renewal.
 Schedule::command('eqa:enforce-deadlines')
-    ->dailyAt('01:00')
+    ->dailyAt(ApplicationFeeService::DEADLINE_JOB_TIME)
     ->timezone('America/Vancouver')
     ->withoutOverlapping();

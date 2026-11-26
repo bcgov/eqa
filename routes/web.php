@@ -214,5 +214,9 @@ Route::middleware('role:'.Role::MINISTRY_ADMIN.','.Role::SUPER_ADMIN)->group(fun
 
     // Fee exemption waives every fee for the institution, so it is limited to Ministry Admins.
     Route::put('/admin/institutions/{crmId}/fee-exempt', [InstitutionController::class, 'updateFeeExempt'])->name('admin.institution.fee-exempt');
+
+    // Application deadlines set by hand (e.g. to check what happens when one passes) and the daily deadline job run on demand.
+    Route::put('/admin/applications/{crmId}/deadlines', [ApplicationWorkflowController::class, 'updateDeadline'])->name('admin.application.deadline');
+    Route::post('/admin/deadlines/run', [ApplicationWorkflowController::class, 'runDeadlines'])->name('admin.deadlines.run');
 });
 });

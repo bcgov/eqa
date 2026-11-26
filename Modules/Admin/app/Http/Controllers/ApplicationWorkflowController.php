@@ -9,18 +9,21 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Modules\Admin\Services\ApplicationFeeService;
 use Modules\Admin\Services\DesignationService;
 
 /**
- * Drives the EQA application approval Business Process Flow (migrated from the
- * Dynamics BPF): Draft -> Application Fee Required -> Fee Payment -> Pending Review ->
- * Under Review [-> Additional Information Required -> Under Review] -> [Eligibility] ->
- * Application Approval | Not Approved -> Non-Approval Reasons | Suitability Review -> End.
- * Each action advances the stage and records the matching decision fields on the
- * application in postgres-dest.
+ * Drives the EQA application approval process (flowchart DRAFT V1.4): Draft -> Application
+ * Fee Required -> Fee Payment -> Pending Review -> Under Review [-> Additional Information
+ * Required -> Under Review] -> [Suitability Review] -> Approve: Fee Required -> Administrative
+ * Fee Received -> (payment confirmed) Pending Approval -> Approved [Under Compliance Order]
+ * | Not Approved -> Non-Approval Reasons -> Declined [-> Pending Appeal -> Overturned (Fee
+ * Required) | Upheld (Declined)]. Each action advances the stage and records the matching
+ * decision fields on the application in postgres-dest.
  */
 class ApplicationWorkflowController extends Controller
 {
@@ -37,19 +40,21 @@ class ApplicationWorkflowController extends Controller
         'fees_payment' => ['confirm_payment' => 'pending_review'],
         'pending_review' => ['begin_review' => 'under_review'],
         'under_review' => [
-            'eligible' => 'application_approval',
+            'eligible' => 'admin_fee',
             'ineligible' => 'not_approved',
             'refer_suitability' => 'suitability_review',
             'request_changes' => 'changes_requested',
         ],
         'changes_requested' => ['extend_changes' => 'changes_requested'],
-        'application_approval' => ['approve' => 'admin_fee'],
+        // Approve decision -> Fee Required -> fee paid -> ministry confirms -> approval (compliance order?).
+        'application_approval' => ['approve' => 'end'],
         'not_approved' => ['record_reasons' => 'non_approval_reasons'],
         'non_approval_reasons' => ['finalize' => 'end'],
         'suitability_review' => ['pass' => 'admin_fee', 'fail' => 'end'],
-        'admin_fee' => ['confirm_admin_fee' => 'end'],
+        'admin_fee' => ['confirm_admin_fee' => 'admin_fee_paid'],
+        'admin_fee_paid' => ['confirm_admin_payment' => 'application_approval'],
         'appeal_payment' => ['confirm_appeal_fee' => 'appeal_review'],
-        'appeal_review' => ['appeal_overturn' => 'application_approval', 'appeal_uphold' => 'end'],
+        'appeal_review' => ['appeal_overturn' => 'admin_fee', 'appeal_uphold' => 'end'],
         'pending_expiry' => ['confirm_expiry' => 'end', 'extend_changes' => 'changes_requested'],
     ];
 
@@ -126,6 +131,51 @@ class ApplicationWorkflowController extends Controller
         return back()->with('success', 'Application details saved.');
     }
 
+    /**
+     * Ministry Admin sets a running deadline by hand (Deadlines panel), e.g. to a date already
+     * passed to check the outcome without waiting. No email is sent.
+     */
+    public function updateDeadline(Request $request, string $crmId): RedirectResponse
+    {
+        $application = DB::table('applications')->where('crm_id', $crmId)->first();
+        abort_if($application === null, 404);
+
+        $today = Carbon::now('America/Vancouver');
+        $data = $request->validate([
+            'deadline' => ['required', Rule::in(ApplicationFeeService::DEADLINE_KEYS)],
+            'date' => ['required', 'date_format:Y-m-d', 'after_or_equal:'.$today->copy()->subYear()->toDateString(), 'before_or_equal:'.$today->copy()->addYears(2)->toDateString()],
+        ], [
+            'date.after_or_equal' => 'The deadline can be at most one year in the past.',
+            'date.before_or_equal' => 'The deadline can be at most two years ahead.',
+        ]);
+
+        $fees = app(ApplicationFeeService::class);
+        $deadline = collect($fees->deadlines($application))->firstWhere('key', $data['deadline']);
+        if ($deadline === null || ! $deadline['editable']) {
+            return back()->with('error', 'That deadline does not apply at the current stage.');
+        }
+
+        $fees->setDeadline($application, $data['deadline'], $data['date']);
+        Log::info('Application deadline set by hand', [
+            'application' => $application->reference, 'deadline' => $data['deadline'], 'from' => $deadline['date'], 'to' => $data['date'], 'by' => $request->user()?->email,
+        ]);
+
+        return back()->with('success', $deadline['label'].' set to '.$data['date'].'.'
+            .($data['date'] < $today->toDateString() ? ' It has passed, so it is applied at the next daily deadline run (or select Run Deadline Checks Now).' : ''));
+    }
+
+    /** Ministry Admin runs the daily deadline job now (same as the nightly run, for every application). */
+    public function runDeadlines(Request $request): RedirectResponse
+    {
+        $counts = app(ApplicationFeeService::class)->enforceDeadlines();
+        Log::info('Deadline checks run by hand', ['by' => $request->user()?->email, 'counts' => $counts]);
+
+        return back()->with('success', sprintf(
+            'Deadline checks run for all applications: %d incomplete application(s) expired, %d completion reminder(s) sent, %d administrative fee(s) expired, %d appeal(s) lapsed, %d resubmission(s) awaiting expiry confirmation, %d designation(s) lapsed.',
+            $counts['incomplete'], $counts['reminders'], $counts['admin_fee'], $counts['appeal'], $counts['changes'], $counts['lapsed'],
+        ));
+    }
+
     public function advance(Request $request, string $crmId): RedirectResponse
     {
         $application = DB::table('applications')->where('crm_id', $crmId)->first();
@@ -175,24 +225,34 @@ class ApplicationWorkflowController extends Controller
                 $fees->extendCompletionDeadline($application, $data['completion_due_date']);
 
                 return back()->with('success', 'Completion deadline set to '.$data['completion_due_date'].'.');
-            case 'approve':
+            case 'eligible':
             case 'pass':
+                // The approve decision: the administrative fee is invoiced first (status Fee Required).
+                DB::table('applications')->where('crm_id', $crmId)->update($action === 'eligible'
+                    ? ['eligibility' => 'Requirements Met', 'review_completion_date' => Carbon::now()->toDateString()]
+                    : ['review_completion_date' => $application->review_completion_date ?: Carbon::now()->toDateString()]);
+
+                return back()->with('success', $this->adminFeeMessage($fees->requireAdminFee(DB::table('applications')->where('crm_id', $crmId)->first())));
+            case 'approve':
+                // Applications that reached Application Approval before the fee moved ahead of the decision.
+                if (! $fees->adminFeePaid($crmId)) {
+                    return back()->with('success', $this->adminFeeMessage($fees->requireAdminFee($application)));
+                }
                 $data = $request->validate([
                     'compliance_order' => ['boolean'],
                     'compliance_order_notes' => ['nullable', 'string', 'max:2000', 'required_if_accepted:compliance_order'],
                 ]);
-                $invoice = $fees->approve(
+                $fees->approve(
                     $application,
                     (bool) ($data['compliance_order'] ?? false),
                     (string) ($data['compliance_order_notes'] ?? ''),
                 );
 
-                $institution = DB::table('institutions')->where('crm_id', $application->institution_crm_id)->first();
-                $designated = ($institution->eqa_status ?? null) === 'Designated';
+                return back()->with('success', 'Application approved'.(($data['compliance_order'] ?? false) ? ' under a compliance order' : '').'. The institution is Designated.');
+            case 'confirm_admin_payment':
+                $fees->adminFeeConfirmed($application);
 
-                return back()->with('success', $invoice->invoice_status === 'Paid'
-                    ? 'Application approved. No administrative fee applies'.($designated ? ', so the designation has been granted.' : '.')
-                    : 'Application approved'.($designated ? ' and the institution is Designated' : '').'. Administrative fee invoice '.$invoice->invoice_number.' ($'.number_format((float) $invoice->total_charges, 2).') sent to the institution.');
+                return back()->with('success', 'Administrative fee payment confirmed. Record the approval decision.');
             case 'confirm_admin_fee':
             case 'confirm_appeal_fee':
                 $invoice = $fees->invoiceFor($crmId, $action === 'confirm_admin_fee' ? ApplicationFeeService::FEE_ADMIN_VARIABLE : ApplicationFeeService::FEE_APPEAL);
@@ -202,11 +262,13 @@ class ApplicationWorkflowController extends Controller
                 [$method, $details] = $this->manualPayment($request);
                 $fees->recordManualPayment($invoice, $method, $details);
 
-                return back()->with('success', 'Payment confirmed. '.$advanced);
+                return back()->with('success', $action === 'confirm_admin_fee'
+                    ? $this->adminFeePaymentMessage((string) DB::table('applications')->where('crm_id', $crmId)->value('workflow_stage'))
+                    : 'Payment confirmed. '.$advanced);
             case 'appeal_overturn':
-                $fees->overturnAppeal($application);
+                $invoice = $fees->overturnAppeal($application);
 
-                return back()->with('success', 'Appeal overturned. Record the approval decision.');
+                return back()->with('success', 'Appeal overturned. '.$this->adminFeeMessage($invoice, false));
             case 'appeal_uphold':
                 $fees->upholdAppeal($application);
 
@@ -237,10 +299,9 @@ class ApplicationWorkflowController extends Controller
             case 'begin_review':
                 $updates['status'] = 'Under Review';
                 break;
-            case 'eligible':
             case 'ineligible':
                 $updates['status'] = 'Under Review';
-                $updates['eligibility'] = $action === 'eligible' ? 'Requirements Met' : 'Requirements Not Met';
+                $updates['eligibility'] = 'Requirements Not Met';
                 $updates['review_completion_date'] = $today;
                 break;
             case 'refer_suitability':
@@ -257,7 +318,7 @@ class ApplicationWorkflowController extends Controller
                 break;
             case 'finalize':
             case 'fail':
-                $updates['status'] = 'Not Approved';
+                $updates['status'] = ApplicationFeeService::STATUS_DECLINED;
                 $updates['designation_decision'] = false;
                 $updates['not_approved_date'] = $today;
                 $updates['appeal_deadline'] = Carbon::now('America/Vancouver')->addDays((int) config('eqa.deadlines.appeal_days', 30))->toDateString();
@@ -267,7 +328,7 @@ class ApplicationWorkflowController extends Controller
         DB::transaction(function () use ($crmId, $updates, $action, $application): void {
             DB::table('applications')->where('crm_id', $crmId)->update($updates);
 
-            // Approval designates once the admin variable fee is paid (ApplicationFeeService);
+            // Approval designates once the administrative fee is paid and confirmed (ApplicationFeeService);
             // a decline cascades onto the institution's EQA Status immediately.
             if (in_array($action, ['finalize', 'fail'], true)) {
                 app(DesignationService::class)->onApplicationNotApproved($application);
@@ -275,8 +336,32 @@ class ApplicationWorkflowController extends Controller
         });
 
         // No decline email: the institution receives a formal decision letter outside the system.
+        if (in_array($action, ['finalize', 'fail'], true)) {
+            return back()->with('success', 'Application declined. The institution can appeal until '.$updates['appeal_deadline'].'.');
+        }
 
         return back()->with('success', 'Application advanced to '.str_replace('_', ' ', $next).'.');
+    }
+
+    /** Flash message after the approve decision invoiced the administrative fee. */
+    private function adminFeeMessage(object $invoice, bool $emailed = true): string
+    {
+        if ($invoice->invoice_status === 'Paid') {
+            return 'No administrative fee applies. Record the approval decision.';
+        }
+
+        return 'Status Fee Required: administrative fee invoice '.$invoice->invoice_number.' ($'.number_format((float) $invoice->total_charges, 2).')'
+            .($emailed ? ' sent to the institution.' : ' raised (no email after an overturned appeal).')
+            .' Approve once the payment is confirmed.';
+    }
+
+    private function adminFeePaymentMessage(string $stage): string
+    {
+        return match ($stage) {
+            'admin_fee_paid' => 'Administrative fee payment recorded. Confirm the payment to continue to the approval decision.',
+            'end' => 'Payment confirmed. The designation has been granted.',
+            default => 'Administrative fee payment recorded.',
+        };
     }
 
     /** @return array<int, string> */

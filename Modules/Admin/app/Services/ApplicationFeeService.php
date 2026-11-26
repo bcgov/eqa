@@ -42,6 +42,16 @@ class ApplicationFeeService
 
     public const STATUS_FEE_RECEIVED = 'Fee Payment Received';
 
+    /** Approve decision taken: the administrative fee is invoiced and the approval follows its confirmed payment. */
+    public const STATUS_ADMIN_FEE_REQUIRED = 'Fee Required';
+
+    public const STATUS_ADMIN_FEE_RECEIVED = 'Administrative Fee Received';
+
+    /** Administrative fee confirmed: waiting for the approval decision (with or without a compliance order). */
+    public const STATUS_PENDING_APPROVAL = 'Pending Approval';
+
+    public const STATUS_DECLINED = 'Declined';
+
     /** Payment method recorded on the $0 invoices of a fee exempt institution. */
     public const METHOD_FEE_EXEMPT = 'Fee Exempt';
 
@@ -275,7 +285,18 @@ class ApplicationFeeService
 
             case self::FEE_ADMIN_VARIABLE:
                 if ($application->workflow_stage === 'admin_fee') {
-                    $this->completeDesignation($application);
+                    if (! empty($application->approved_date)) {
+                        // Approved before the administrative fee moved ahead of the approval decision.
+                        $this->completeDesignation($application);
+                    } elseif ((float) ($invoice->total_charges ?? 0) <= 0) {
+                        // Nothing was paid, so there is no payment for the ministry to confirm.
+                        $this->adminFeeConfirmed($application);
+                    } else {
+                        DB::table('applications')->where('crm_id', $application->crm_id)->update([
+                            'workflow_stage' => 'admin_fee_paid',
+                            'status' => self::STATUS_ADMIN_FEE_RECEIVED,
+                        ]);
+                    }
                 }
                 break;
 
@@ -524,6 +545,103 @@ class ApplicationFeeService
             ->update(['due_date' => $dueDate]);
     }
 
+    /** Time of day (America/Vancouver) the daily eqa:enforce-deadlines job runs (routes/console.php). */
+    public const DEADLINE_JOB_TIME = '01:00';
+
+    /** Application deadlines the ministry can set by hand on the review page. */
+    public const DEADLINE_KEYS = ['completion', 'changes', 'admin_fee', 'appeal'];
+
+    /**
+     * Every deadline of the application for the ministry's review page: its date, whether it is
+     * running at the current stage (only those can be changed), what happens when it passes and
+     * when that is applied (the daily job runs the day after the due date at DEADLINE_JOB_TIME).
+     *
+     * @return list<array{key: string, label: string, date: ?string, active: bool, editable: bool, outcome: string, applies_at: ?string, applied_by: string, note: ?string}>
+     */
+    public function deadlines(object $application): array
+    {
+        $crmId = (string) $application->crm_id;
+        $stage = $application->workflow_stage ?: 'draft';
+        $adminFee = $this->invoiceFor($crmId, self::FEE_ADMIN_VARIABLE);
+        $institution = $this->institution($application);
+        $job = 'Daily deadline job ('.self::DEADLINE_JOB_TIME.')';
+        $date = fn ($value): ?string => empty($value) ? null : substr((string) $value, 0, 10);
+
+        $completion = $date($application->completion_due_date ?? null);
+        $reminderDays = (int) config('eqa.deadlines.application_reminder_days', 7);
+        $reminder = ! empty($application->completion_reminder_sent_at)
+            ? 'Reminder emailed '.substr((string) $application->completion_reminder_sent_at, 0, 10).'.'
+            : ($completion ? 'Reminder email due '.Carbon::parse($completion)->subDays($reminderDays)->toDateString().' ('.$reminderDays.' days before).' : null);
+
+        $appealPaying = $stage === 'appeal_payment';
+        $appealOpen = $appealPaying || ($stage === 'end' && $application->status === self::STATUS_DECLINED && empty($application->appeal_decision));
+        $appeal = $date($application->appeal_deadline ?? null);
+
+        $designated = ($institution->eqa_status ?? null) === 'Designated';
+
+        return [
+            $this->deadline('completion', 'Application completion (submit and pay the application fee)', $completion,
+                in_array($stage, self::COMPLETION_STAGES, true), 'The application expires (Expired).', $job, $reminder),
+            $this->deadline('changes', 'Resubmission of additional information', $date($application->changes_due_date ?? null),
+                $stage === 'changes_requested', 'Moves to Pending Admin Confirm Expiry for the ministry to confirm or extend.', $job),
+            $this->deadline('admin_fee', 'Administrative fee payment', $date($adminFee->due_date ?? null),
+                $stage === 'admin_fee', 'The application expires (Expired).', $job),
+            $this->deadline('appeal', $appealPaying ? 'Appeal fee payment (appeal deadline)' : 'Appeal window', $appeal,
+                $appealOpen, $appealPaying ? 'The appeal lapses and the decline stands (Declined).' : 'The Appeal Decision button is no longer shown.',
+                $appealPaying ? $job : 'Immediately (checked when the institution opens the application)', null, ! $appealPaying),
+            array_merge($this->deadline('designation', 'Institution designation expiry', $date($institution->designation_expiry ?? null),
+                $designated, 'The institution is De-Designated unless an approved renewal (or one going through its administrative fee) carries it.', $job,
+                'Renewal reminders are emailed 90 and 30 days before (07:00 notification job). Change this date on the institution page.'), ['editable' => false]),
+        ];
+    }
+
+    /** @return array{key: string, label: string, date: ?string, active: bool, editable: bool, outcome: string, applies_at: ?string, applied_by: string, note: ?string} */
+    private function deadline(string $key, string $label, ?string $date, bool $active, string $outcome, string $appliedBy, ?string $note = null, bool $immediate = false): array
+    {
+        $appliesAt = null;
+        if ($date !== null) {
+            // A deadline is met through the whole due date; the daily job acts on it the next day.
+            $appliesAt = $immediate
+                ? Carbon::parse($date, 'America/Vancouver')->addDay()->startOfDay()->toIso8601String()
+                : Carbon::parse($date.' '.self::DEADLINE_JOB_TIME, 'America/Vancouver')->addDay()->toIso8601String();
+        }
+
+        return [
+            'key' => $key,
+            'label' => $label,
+            'date' => $date,
+            'active' => $active,
+            'editable' => $active,
+            'outcome' => $outcome,
+            'applies_at' => $appliesAt,
+            'applied_by' => $appliedBy,
+            'note' => $note,
+        ];
+    }
+
+    /**
+     * Ministry sets a running deadline by hand (no email), including a date already passed so the
+     * outcome can be checked without waiting: the daily job (or Run Deadline Checks Now) applies it.
+     */
+    public function setDeadline(object $application, string $key, string $date): void
+    {
+        $crmId = (string) $application->crm_id;
+        $unpaid = fn (string|array $feeTypes) => DB::table('invoices')
+            ->where('application_crm_id', $crmId)
+            ->whereIn('fee_type', (array) $feeTypes)
+            ->whereNotIn('invoice_status', ['Paid', 'Expired']);
+
+        match ($key) {
+            'completion' => $this->extendCompletionDeadline($application, $date),
+            'changes' => DB::table('applications')->where('crm_id', $crmId)->update(['changes_due_date' => $date]),
+            'admin_fee' => $unpaid(self::FEE_ADMIN_VARIABLE)->update(['due_date' => $date]),
+            'appeal' => [
+                DB::table('applications')->where('crm_id', $crmId)->update(['appeal_deadline' => $date]),
+                $unpaid(self::FEE_APPEAL)->update(['due_date' => $date]),
+            ],
+        };
+    }
+
     public const STATUS_INFO_REQUIRED = 'Additional Information Required';
 
     public const STATUS_PENDING_EXPIRY = 'Pending Admin Confirm Expiry';
@@ -576,15 +694,66 @@ class ApplicationFeeService
         }
     }
 
-    /** Approval (optionally under a compliance order): raise the administrative fee invoice and send the decision (not after an appeal). */
-    public function approve(object $application, bool $complianceOrder, string $complianceNotes): object
+    /**
+     * Approve decision (eligibility met, suitability passed or appeal overturned): the administrative
+     * fee is invoiced (status Fee Required). The approval itself, with or without a compliance order,
+     * is recorded once the fee is paid and the ministry has confirmed the payment. The fee email is
+     * not sent after an overturned appeal (the ADM sends a formal letter).
+     */
+    public function requireAdminFee(object $application): object
     {
-        $today = $this->today();
         $due = Carbon::now('America/Vancouver')->addDays((int) config('eqa.deadlines.admin_fee_days', 30))->toDateString();
         $quote = $this->adminFeeQuote($application);
 
         DB::table('applications')->where('crm_id', $application->crm_id)->update([
             'workflow_stage' => 'admin_fee',
+            'status' => self::STATUS_ADMIN_FEE_REQUIRED,
+            'designation_expiry' => $application->designation_expiry ?: Carbon::now('America/Vancouver')->addYear()->toDateString(),
+        ]);
+        $application = DB::table('applications')->where('crm_id', $application->crm_id)->first();
+        $institution = $this->institution($application);
+
+        $invoice = $this->createQuotedInvoice($application, self::FEE_ADMIN_VARIABLE, $quote, $due);
+
+        // Nothing to pay (e.g. public institution with no international students, or fee exempt):
+        // straight to the approval decision.
+        if ($this->settleIfNothingDue($invoice, $institution)) {
+            return DB::table('invoices')->where('crm_id', $invoice->crm_id)->first();
+        }
+
+        if ($institution !== null && ! $this->decidedOnAppeal($application)) {
+            $this->notifier->adminFeeRequired($institution, $application, $invoice);
+        }
+
+        return $invoice;
+    }
+
+    /** Ministry confirmed the administrative fee payment: the approval decision is next. */
+    public function adminFeeConfirmed(object $application): void
+    {
+        DB::table('applications')->where('crm_id', $application->crm_id)->update([
+            'workflow_stage' => 'application_approval',
+            'status' => self::STATUS_PENDING_APPROVAL,
+        ]);
+    }
+
+    /** The administrative fee of this application has been paid (only then can it be approved). */
+    public function adminFeePaid(string $applicationCrmId): bool
+    {
+        return ($this->invoiceFor($applicationCrmId, self::FEE_ADMIN_VARIABLE)->invoice_status ?? null) === 'Paid';
+    }
+
+    /**
+     * Approval (optionally under a compliance order), once the administrative fee is paid and
+     * confirmed: the institution is Designated, its profile enrolment follows this application and
+     * the decision is emailed (not after an overturned appeal).
+     */
+    public function approve(object $application, bool $complianceOrder, string $complianceNotes): void
+    {
+        $today = $this->today();
+        DB::table('applications')->where('crm_id', $application->crm_id)->update([
+            'workflow_stage' => 'end',
+            'process_completed' => true,
             'status' => $complianceOrder ? 'Approved (Under Compliance Order)' : 'Approved',
             'designation_decision' => true,
             'approved_date' => $today,
@@ -592,33 +761,22 @@ class ApplicationFeeService
             'compliance_order' => $complianceOrder,
             'compliance_order_notes' => $complianceOrder ? $complianceNotes : null,
         ]);
-
         $application = DB::table('applications')->where('crm_id', $application->crm_id)->first();
 
-        // The institution's profile enrolment follows the most recent approved application, and an
-        // institution that is not yet Designated is designated now (renewals extend once the fee is paid).
         $this->designation->syncEnrolmentFromApplication($application);
-        $this->designation->designateOnApproval($application, $today, $application->designation_expiry);
-        $application = DB::table('applications')->where('crm_id', $application->crm_id)->first();
-
-        $invoice = $this->createQuotedInvoice($application, self::FEE_ADMIN_VARIABLE, $quote, $due);
-
-        // Nothing to pay (e.g. public institution with no international students, or fee exempt): designate now.
-        if ($this->settleIfNothingDue($invoice, $this->institution($application))) {
-            return DB::table('invoices')->where('crm_id', $invoice->crm_id)->first();
-        }
+        $this->designation->onApplicationApproved($application, $today, $application->designation_expiry);
 
         $institution = $this->institution($application);
         if ($institution !== null && ! $this->decidedOnAppeal($application)) {
-            $this->notifier->approvedFeeDue($institution, $application, $invoice, $complianceOrder, $complianceNotes);
+            $this->notifier->applicationApproved($institution, (string) $application->reference, $today, [
+                'designation_expiry' => (string) ($application->designation_expiry ?? ''),
+            ]);
         }
-
-        return $invoice;
     }
 
     public function canAppeal(object $application): bool
     {
-        return $application->status === 'Not Approved'
+        return $application->status === self::STATUS_DECLINED
             && $application->workflow_stage === 'end'
             && ! empty($application->appeal_deadline)
             && $this->today() <= (string) $application->appeal_deadline
@@ -647,23 +805,23 @@ class ApplicationFeeService
     {
         DB::table('applications')->where('crm_id', $application->crm_id)->update([
             'workflow_stage' => 'end',
-            'status' => 'Declined',
+            'status' => self::STATUS_DECLINED,
             'appeal_decision' => 'Upheld',
             'appeal_decision_date' => $this->today(),
             'appeal_successful' => false,
         ]);
     }
 
-    /** Appeal overturned: the application returns to the approval decision (compliance order or not). */
-    public function overturnAppeal(object $application): void
+    /** Appeal overturned: approved, so the administrative fee is invoiced (status Fee Required), without the fee email. */
+    public function overturnAppeal(object $application): object
     {
         DB::table('applications')->where('crm_id', $application->crm_id)->update([
-            'workflow_stage' => 'application_approval',
-            'status' => 'Under Review',
             'appeal_decision' => 'Overturned',
             'appeal_decision_date' => $this->today(),
             'appeal_successful' => true,
         ]);
+
+        return $this->requireAdminFee(DB::table('applications')->where('crm_id', $application->crm_id)->first());
     }
 
     /**
@@ -696,7 +854,7 @@ class ApplicationFeeService
                 DB::table('applications')->where('crm_id', $row->application_crm_id)->update(
                     $stage === 'admin_fee'
                         ? ['workflow_stage' => 'end', 'status' => 'Expired']
-                        : ['workflow_stage' => 'end', 'status' => 'Not Approved']
+                        : ['workflow_stage' => 'end', 'status' => self::STATUS_DECLINED]
                 );
                 if ($stage === 'admin_fee') {
                     // Designated on approval but the administrative fee was never paid.

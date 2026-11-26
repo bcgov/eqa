@@ -78,6 +78,7 @@ class ApplicationController extends Controller
                 ->each(fn (object $invoice) => $invoice->payment_under_review = app(ExpressPayService::class)->hasPaymentUnderReview((string) $invoice->crm_id)),
             'adminFeeQuote' => app(ApplicationFeeService::class)->adminFeeQuote(DB::table('applications')->where('crm_id', $crmId)->first()),
             'defaultChangesDueDate' => app(ApplicationFeeService::class)->defaultChangesDueDate(),
+            'deadlines' => app(ApplicationFeeService::class)->deadlines(DB::table('applications')->where('crm_id', $crmId)->first()),
             'campusLocations' => app(ApplicationProfileService::class)->campusLocations($crmId),
             'previousNames' => app(ApplicationProfileService::class)->previousNames($crmId),
             'websiteCompliance' => app(WebsiteComplianceService::class)->copy($crmId),

@@ -215,7 +215,7 @@ class RedBoxWorkflowTest extends TestCase
 
     public function test_approve_with_compliance_order(): void
     {
-        $id = $this->applicationAt('application_approval', 'Under Review');
+        $id = $this->pendingApproval();
 
         $this->asMinistry()->post("/admin/applications/{$id}/advance", [
             'action' => 'approve',
@@ -226,19 +226,19 @@ class RedBoxWorkflowTest extends TestCase
         $application = $this->application($id);
         $this->assertSame('Approved (Under Compliance Order)', $application->status);
         $this->assertEquals(1, $application->compliance_order);
-        $this->assertSame('admin_fee', $application->workflow_stage);
-        $this->assertNotified('application_approved_fee_due', 'Correct the refund policy within 60 days.');
+        $this->assertSame('end', $application->workflow_stage);
+        $this->assertNotified('application_approved');
     }
 
     public function test_approve_without_compliance_order(): void
     {
-        $id = $this->applicationAt('application_approval', 'Under Review');
+        $id = $this->pendingApproval();
 
         $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve'])
             ->assertSessionHas('success');
 
         $this->assertSame('Approved', $this->application($id)->status);
-        $this->assertNotified('application_approved_fee_due');
+        $this->assertNotified('application_approved');
     }
 
     // Phase 3 ----------------------------------------------------------------
@@ -247,9 +247,9 @@ class RedBoxWorkflowTest extends TestCase
     {
         config(['eqa.fees.multi_location' => 3000, 'eqa.fees.per_international_student' => 2]);
         $this->institutionLocations(3);
-        $id = $this->applicationAt('application_approval', 'Under Review');
+        $id = $this->applicationAt('under_review', 'Under Review');
 
-        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve', 'admin_fee' => 1]);
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'eligible', 'admin_fee' => 1]);
 
         $invoice = $this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE);
         $this->assertNotNull($invoice);
@@ -261,8 +261,8 @@ class RedBoxWorkflowTest extends TestCase
         $this->assertSame(['multi_location', 'international_students'], array_column(json_decode($invoice->line_items, true), 'code'));
         $this->assertSame('Unpaid', $invoice->invoice_status);
         $this->assertSame(Carbon::now('America/Vancouver')->addDays(30)->toDateString(), $invoice->due_date);
-        // A first-time applicant is Designated on approval; the fee is still due.
-        $this->assertSame('Designated', DB::table('institutions')->where('crm_id', self::INSTITUTION)->value('eqa_status'));
+        $this->assertSame('Fee Required', $this->application($id)->status);
+        $this->assertNotSame('Designated', DB::table('institutions')->where('crm_id', self::INSTITUTION)->value('eqa_status'), 'Designated only once approved after the fee.');
         $this->assertNotified('application_approved_fee_due', $invoice->invoice_number);
     }
 
@@ -270,8 +270,8 @@ class RedBoxWorkflowTest extends TestCase
     {
         config(['eqa.fees.per_international_student' => 2]);
         $this->institutionLocations(1);
-        $single = $this->applicationAt('application_approval', 'Under Review');
-        $this->asMinistry()->post("/admin/applications/{$single}/advance", ['action' => 'approve']);
+        $single = $this->applicationAt('under_review', 'Under Review');
+        $this->asMinistry()->post("/admin/applications/{$single}/advance", ['action' => 'eligible']);
 
         $invoice = $this->invoice($single, ApplicationFeeService::FEE_ADMIN_VARIABLE);
         $this->assertEquals(200, $invoice->total_charges);
@@ -283,47 +283,51 @@ class RedBoxWorkflowTest extends TestCase
         $this->assertStringContainsString('Multiple Location Fee not applied (public institution)', $quote['description']);
     }
 
-    public function test_no_admin_fee_due_designates_on_approval(): void
+    public function test_no_admin_fee_due_goes_straight_to_the_approval_decision(): void
     {
         $this->institutionLocations(1, ApplicationFeeService::PUBLIC_QA_MET_THROUGH);
-        $id = $this->applicationAt('application_approval', 'Under Review');
+        $id = $this->applicationAt('under_review', 'Under Review');
         DB::table('applications')->where('crm_id', $id)->update(['intl_students_permit' => 0]);
 
-        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve'])->assertSessionHas('success');
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'eligible'])->assertSessionHas('success');
 
         $invoice = $this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE);
         $this->assertEquals(0, $invoice->total_charges);
         $this->assertSame('Paid', $invoice->invoice_status);
         $this->assertSame('No Charge', $invoice->payment_method);
         $this->assertStringContainsString('International Student Fee not applied (0 study permit students)', $invoice->description);
-        $this->assertSame('end', $this->application($id)->workflow_stage);
-        $this->assertSame('Designated', DB::table('institutions')->where('crm_id', self::INSTITUTION)->value('eqa_status'));
+        $this->assertSame('application_approval', $this->application($id)->workflow_stage);
+        $this->assertSame('Pending Approval', $this->application($id)->status);
     }
 
     public function test_inst_pays_admin_variable_fee(): void
     {
-        $id = $this->applicationAt('application_approval', 'Under Review');
-        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve']);
+        $id = $this->applicationAt('under_review', 'Under Review');
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'eligible']);
 
         $this->payOnline($this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE));
+        $this->assertSame('Paid', $this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE)->invoice_status);
+        $this->assertSame('Administrative Fee Received', $this->application($id)->status);
+
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'confirm_admin_payment'])->assertSessionHas('success');
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve'])->assertSessionHas('success');
 
         $this->assertSame('end', $this->application($id)->workflow_stage);
-        $this->assertSame('Paid', $this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE)->invoice_status);
         $this->assertSame('Designated', DB::table('institutions')->where('crm_id', self::INSTITUTION)->value('eqa_status'));
         $this->assertNotified('application_approved');
     }
 
     public function test_inst_does_not_pay_admin_variable_fee_expires(): void
     {
-        $id = $this->applicationAt('application_approval', 'Under Review');
-        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'approve']);
+        $id = $this->applicationAt('under_review', 'Under Review');
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'eligible']);
 
         $this->travel(31)->days();
         $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
 
         $this->assertSame('Expired', $this->application($id)->status);
         $this->assertSame('Expired', $this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE)->invoice_status);
-        $this->assertSame('Not Approved', DB::table('institutions')->where('crm_id', self::INSTITUTION)->value('eqa_status'), 'Designated on approval, undone when the fee is not paid.');
+        $this->assertNotSame('Designated', DB::table('institutions')->where('crm_id', self::INSTITUTION)->value('eqa_status'));
     }
 
     public function test_appeal_button_shows_up_within_deadline(): void
@@ -336,7 +340,7 @@ class RedBoxWorkflowTest extends TestCase
         $this->travel(31)->days();
         $this->viewApplication($id)->assertJsonPath('props.canAppeal', false);
         $this->asInstitution()->post("/web/applications/{$id}/appeal")->assertSessionHas('error');
-        $this->assertSame('Not Approved', $this->application($id)->status);
+        $this->assertSame('Declined', $this->application($id)->status);
     }
 
     public function test_appeal_pays_appeal_fee_pending_appeal(): void
@@ -369,13 +373,15 @@ class RedBoxWorkflowTest extends TestCase
         $this->assertSame('end', $application->workflow_stage);
     }
 
-    public function test_appeal_overturned_returns_to_approve_with_compliance_order(): void
+    public function test_appeal_overturned_goes_to_fee_required_then_approve_with_compliance_order(): void
     {
         $id = $this->appealUnderReview();
 
         $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'appeal_overturn'])->assertSessionHas('success');
-        $this->assertSame('application_approval', $this->application($id)->workflow_stage);
+        $this->assertSame('Fee Required', $this->application($id)->status);
 
+        $this->payOnline($this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE));
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'confirm_admin_payment'])->assertSessionHas('success');
         $this->asMinistry()->post("/admin/applications/{$id}/advance", [
             'action' => 'approve',
             'compliance_order' => true,
@@ -383,7 +389,7 @@ class RedBoxWorkflowTest extends TestCase
         ]);
 
         $this->assertSame('Approved (Under Compliance Order)', $this->application($id)->status);
-        $this->assertSame(0, DB::table('sent_emails')->where('template_key', 'application_approved_fee_due')->count(), 'Approved on appeal: the ADM sends a formal letter.');
+        $this->assertSame(0, DB::table('sent_emails')->whereIn('template_key', ['application_approved_fee_due', 'application_approved'])->count(), 'Approved on appeal: the ADM sends a formal letter.');
     }
 
     // Helpers ------------------------------------------------------------------
@@ -443,8 +449,20 @@ class RedBoxWorkflowTest extends TestCase
         $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'finalize'])->assertSessionHas('success');
 
         $application = $this->application($id);
-        $this->assertSame('Not Approved', $application->status);
+        $this->assertSame('Declined', $application->status);
         $this->assertSame(Carbon::now('America/Vancouver')->addDays(30)->toDateString(), $application->appeal_deadline);
+
+        return $id;
+    }
+
+    /** Approve decision, administrative fee recorded by the ministry (EFT) and confirmed. */
+    private function pendingApproval(): string
+    {
+        $id = $this->applicationAt('under_review', 'Under Review');
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'eligible'])->assertSessionHas('success');
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'confirm_admin_fee', 'payment_method' => 'EFT'])->assertSessionHas('success');
+        $this->asMinistry()->post("/admin/applications/{$id}/advance", ['action' => 'confirm_admin_payment'])->assertSessionHas('success');
+        $this->assertSame('application_approval', $this->application($id)->workflow_stage);
 
         return $id;
     }
