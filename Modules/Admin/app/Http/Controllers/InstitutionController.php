@@ -69,6 +69,15 @@ class InstitutionController extends Controller
                 ? DB::table('sent_emails')->where('institution_crm_id', $crmId)->orderByDesc('sent_at')->orderByDesc('id')->get()
                 : collect(),
             'bceidLookup' => session($this->bceidLookupKey($crmId)),
+            // The approved application the profile enrolment is taken from (copied on each approval).
+            'enrolmentSource' => Schema::hasTable('applications')
+                ? DB::table('applications')
+                    ->where('institution_crm_id', $crmId)
+                    ->where('status', 'like', 'Approved%')
+                    ->orderByDesc('approved_date')
+                    ->orderByDesc('application_date')
+                    ->first(['crm_id', 'reference', 'approved_date'])
+                : null,
             'previousOperatingNames' => Schema::hasTable('previous_operating_names')
                 ? Institution::find($crmId)?->previousOperatingNames()->with('application:crm_id,reference')->get() ?? collect()
                 : collect(),

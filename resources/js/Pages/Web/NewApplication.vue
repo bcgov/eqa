@@ -10,6 +10,7 @@ const props = defineProps({
     campusLocations: { type: Array, default: () => [] },
     previousNames: { type: Array, default: () => [] },
     websiteCompliance: { type: Array, default: () => [] },
+    completionDays: { type: Number, default: null },
 })
 
 // "?" bubble text, maintained under Maintenance > Utils (Application Help Text).
@@ -234,6 +235,12 @@ function save(intent) {
         <p class="mt-1 text-sm text-slate-500">Move between the steps in any order. Select <span class="font-medium">Save Draft</span> at any time to keep your progress, and <span class="font-medium">{{ resubmitting ? 'Resubmit' : 'Submit' }} Application</span> on the last step when every step is complete. Fields marked <span class="text-red-600" aria-hidden="true">*</span><span class="sr-only">with an asterisk</span> are required before you can submit.</p>
 
         <div v-if="flash.success" class="mt-4 rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700" role="status">{{ flash.success }}</div>
+        <p v-if="application && application.workflow_stage === 'draft' && application.completion_due_date" class="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+            <b>Complete by {{ application.completion_due_date }}.</b> Submit this application and pay the application fee by this date, or the application expires and you will need to start a new one.
+        </p>
+        <p v-else-if="!application && completionDays" class="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+            Once you save or submit this application, you have <b>{{ completionDays }} days</b> to submit it and pay the application fee, or the application expires.
+        </p>
         <div v-if="flash.error" class="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700" role="alert">{{ flash.error }}</div>
         <div v-else-if="Object.keys(form.errors).length" class="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700" role="alert">
             Some information is missing or needs correcting. Steps marked <span aria-hidden="true">!</span><span class="sr-only">needs attention</span> need attention.
@@ -470,10 +477,10 @@ function save(intent) {
             <div v-show="step === 6" class="space-y-6">
             <!-- Per Student Fee Payment Enrollment -->
             <section class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-                <div class="block sm:max-w-sm"><label for="app-per_student_fee_enrolment" class="text-sm font-semibold text-slate-700">Per Student Fee Payment Enrollment <span class="text-red-600">*</span></label>
-                    <InfoTooltip class="ml-1" title="Per Student Fee Payment Enrollment" :text="help.per_student_fee_enrolment" />
-                    <input id="app-per_student_fee_enrolment" aria-required="true" v-model="form.per_student_fee_enrolment" type="number" min="0" step="1" inputmode="numeric" :class="inputClass" />
+                <div class="block"><label for="app-per_student_fee_enrolment" class="text-sm font-semibold text-slate-700">Per Student Fee Payment Enrollment <span class="text-red-600">*</span></label>
+                    <input id="app-per_student_fee_enrolment" aria-required="true" aria-describedby="app-per_student_fee_enrolment-help" v-model="form.per_student_fee_enrolment" type="number" min="0" step="1" inputmode="numeric" :class="inputClass" />
                     <span v-if="form.errors.per_student_fee_enrolment" class="mt-1 block text-xs text-red-600">{{ form.errors.per_student_fee_enrolment }}</span>
+                    <p id="app-per_student_fee_enrolment-help" class="mt-2 text-xs leading-relaxed text-slate-600">{{ help.per_student_fee_enrolment }}</p>
                 </div>
             </section>
 

@@ -28,11 +28,12 @@ class ApplicationWorkflowController extends Controller
     private const MANUAL_PAYMENT_METHODS = ['EFT', 'Cheque', 'Other'];
 
     /**
-     * stage => [action => next stage]. Drafts have none: only the institution can submit (or resubmit
-     * an application returned for additional information).
+     * stage => [action => next stage]. Only the institution can submit a draft (or resubmit an
+     * application returned for additional information); the ministry can move its completion deadline.
      */
     private const TRANSITIONS = [
-        'fee_required' => ['record_payment' => 'fees_payment'],
+        'draft' => ['extend_completion' => 'draft'],
+        'fee_required' => ['record_payment' => 'fees_payment', 'extend_completion' => 'fee_required'],
         'fees_payment' => ['confirm_payment' => 'pending_review'],
         'pending_review' => ['begin_review' => 'under_review'],
         'under_review' => [
@@ -155,17 +156,26 @@ class ApplicationWorkflowController extends Controller
         switch ($action) {
             case 'request_changes':
                 $data = $request->validate(
-                    ['changes' => ['required', 'string', 'max:2000'], 'changes_due_date' => $this->changesDueDateRules(false)],
+                    ['changes' => ['required', 'string', 'max:2000'], 'changes_due_date' => $this->dueDateRules(false)],
                     $this->changesDueDateMessages(),
                 );
                 $fees->requestChanges($application, $data['changes'], $data['changes_due_date'] ?? null);
 
                 return back()->with('success', 'Additional information requested; the institution has been notified.');
             case 'extend_changes':
-                $data = $request->validate(['changes_due_date' => $this->changesDueDateRules(true)], $this->changesDueDateMessages());
+                $data = $request->validate(['changes_due_date' => $this->dueDateRules(true)], $this->changesDueDateMessages());
                 $fees->extendChangesDeadline($application, $data['changes_due_date']);
 
                 return back()->with('success', 'Resubmission deadline set to '.$data['changes_due_date'].'; the institution has been notified.');
+            case 'extend_completion':
+                $data = $request->validate(['completion_due_date' => $this->dueDateRules(true)], [
+                    'completion_due_date.required' => 'Choose the date the institution must complete the application by.',
+                    'completion_due_date.after' => 'The completion deadline must be after today.',
+                    'completion_due_date.before_or_equal' => 'The completion deadline must be within one year.',
+                ]);
+                $fees->extendCompletionDeadline($application, $data['completion_due_date']);
+
+                return back()->with('success', 'Completion deadline set to '.$data['completion_due_date'].'.');
             case 'approve':
             case 'pass':
                 $data = $request->validate([
@@ -283,7 +293,7 @@ class ApplicationWorkflowController extends Controller
     }
 
     /** @return array<int, string> */
-    private function changesDueDateRules(bool $required): array
+    private function dueDateRules(bool $required): array
     {
         $today = Carbon::now('America/Vancouver');
 

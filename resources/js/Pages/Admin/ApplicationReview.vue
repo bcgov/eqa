@@ -20,6 +20,8 @@ const props = defineProps({
 
 const page = usePage()
 const flash = computed(() => page.props.flash || {})
+// "?" help text (Maintenance > Utils), shown as hover hints on the enrolment labels.
+const help = computed(() => page.props.settings?.help ?? {})
 
 // PTIRU Standing is only relevant when QA is met through the Private Training
 // designation. Match both the legacy "(PTIB)" label and the renamed "(PTIRU)" one,
@@ -66,6 +68,9 @@ const tomorrow = (() => { const d = new Date(); d.setDate(d.getDate() + 1); retu
 // Extending: start from the current deadline when it is still ahead, otherwise from the default.
 const newDueDate = ref(props.application.changes_due_date && props.application.changes_due_date >= tomorrow ? props.application.changes_due_date : props.defaultChangesDueDate)
 const errors = computed(() => page.props.errors || {})
+// Application completion deadline (draft / unpaid application fee): starts from the current deadline when still ahead.
+const newCompletionDate = ref(props.application.completion_due_date && props.application.completion_due_date >= tomorrow ? props.application.completion_due_date : tomorrow)
+watch(() => props.application.completion_due_date, (due) => { if (due && due >= tomorrow) newCompletionDate.value = due })
 function confirmExpiry() {
     if (confirm(`Expire ${props.application.reference}? The institution missed its resubmission deadline (${props.application.changes_due_date || '—'}). This closes the application.`)) {
         advance('confirm_expiry')
@@ -237,6 +242,18 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
     <div class="mt-6 rounded-lg border-2 border-indigo-100 bg-indigo-50/40 p-5">
         <h2 class="mb-3 text-sm font-semibold text-indigo-900">Next step</h2>
 
+        <div v-if="feeUnpaid" class="mb-4 rounded-md border border-slate-200 bg-white p-3">
+            <p class="text-sm text-slate-600">
+                The institution must {{ stage === 'draft' ? 'submit the application and pay' : 'pay' }} the application fee by <b>{{ application.completion_due_date || '—' }}</b>, or it expires.
+                <span v-if="application.completion_reminder_sent_at" class="text-slate-500">A reminder was emailed on {{ String(application.completion_reminder_sent_at).slice(0, 10) }}.</span>
+            </p>
+            <form class="mt-2 flex flex-wrap items-end gap-2" @submit.prevent="advance('extend_completion', { completion_due_date: newCompletionDate })">
+                <label for="completion-due-date" class="text-sm text-slate-600">Change completion deadline</label>
+                <input id="completion-due-date" v-model="newCompletionDate" type="date" :min="tomorrow" required :aria-invalid="!!errors.completion_due_date" :aria-describedby="errors.completion_due_date ? 'completion-due-date-error' : undefined" class="block rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:border-slate-500 focus:outline-none" />
+                <button type="submit" :disabled="busy || newCompletionDate === application.completion_due_date" :class="[btn, 'bg-slate-600 hover:bg-slate-700']">Update Deadline</button>
+                <span v-if="errors.completion_due_date" id="completion-due-date-error" class="w-full text-xs text-red-600">{{ errors.completion_due_date }}</span>
+            </form>
+        </div>
         <div v-if="stage === 'draft'">
             <p class="text-sm text-slate-600">The application is a draft. The institution must submit it before the review process begins.</p>
         </div>
@@ -457,6 +474,16 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
                     <label class="flex items-center gap-2"><input type="checkbox" v-model="form.reason_not_meet_eligibility" :disabled="locked" class="rounded"> Does Not Meet Eligibility Requirements</label>
                 </div>
             </div>
+        </div>
+
+        <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 class="mb-3 text-sm font-semibold text-slate-700">Student Enrolment Information</h2>
+            <dl class="grid gap-x-8 text-sm sm:grid-cols-2">
+                <div class="flex justify-between border-b border-slate-100 py-2"><dt class="text-slate-500" :title="help.total_enrolment">Total Institution Enrolment</dt><dd class="text-slate-800">{{ application.total_enrolment ?? '—' }}</dd></div>
+                <div class="flex justify-between border-b border-slate-100 py-2"><dt class="text-slate-500" :title="help.intl_students_permit">Number of International Students - Study Permit</dt><dd class="text-slate-800">{{ application.intl_students_permit ?? '—' }}</dd></div>
+                <div class="flex justify-between border-b border-slate-100 py-2"><dt class="text-slate-500" :title="help.in_person_students">Total Number of In-Person Students</dt><dd class="text-slate-800">{{ application.in_person_students ?? '—' }}</dd></div>
+                <div class="flex justify-between border-b border-slate-100 py-2"><dt class="text-slate-500" :title="help.online_students">Total Number of Online Students</dt><dd class="text-slate-800">{{ application.online_students ?? '—' }}</dd></div>
+            </dl>
         </div>
 
         <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">

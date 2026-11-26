@@ -17,6 +17,10 @@ return [
         'admin_fee_days' => (int) env('EQA_ADMIN_FEE_DAYS', 30),
         'appeal_days' => (int) env('EQA_APPEAL_DAYS', 30),
         'changes_days' => (int) env('EQA_CHANGES_DAYS', 30),
+        // From starting an application (Draft) until its application fee is paid; unfinished ones expire.
+        'application_days' => (int) env('EQA_APPLICATION_DAYS', 30),
+        // Reminder email this many days before the completion deadline (0 = no reminder).
+        'application_reminder_days' => (int) env('EQA_APPLICATION_REMINDER_DAYS', 7),
     ],
 
     // Ministry / program contact details shown around the application (invoices, footer).

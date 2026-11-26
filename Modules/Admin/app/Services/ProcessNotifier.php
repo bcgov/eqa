@@ -218,6 +218,23 @@ class ProcessNotifier
     // Payment / appeal workflow (flowchart DRAFT V1.1).
     // ---------------------------------------------------------------------
 
+    /** Reminder that a draft or unpaid application expires if it is not completed by its completion deadline. */
+    public function completionReminder(object $institution, object $application, ?object $feeInvoice = null): void
+    {
+        $contact = $this->contact($institution);
+        $nextStep = ($application->workflow_stage ?? null) === 'fee_required'
+            ? 'It has been submitted, but the application fee'.($feeInvoice !== null ? ' (invoice '.($feeInvoice->invoice_number ?? '').')' : '').' has not been paid. Please sign in to the EQA portal to pay it.'
+            : 'It has not been submitted yet. Please sign in to the EQA portal, complete and submit the application, then pay the application fee.';
+
+        $this->emails->send('application_completion_reminder', [
+            'contact_name' => $contact['name'] !== '' ? $contact['name'] : 'Applicant',
+            'institution_name' => (string) ($institution->name ?? ''),
+            'application_reference' => (string) ($application->reference ?? ''),
+            'completion_due_date' => (string) ($application->completion_due_date ?? ''),
+            'next_step' => $nextStep,
+        ], $contact['email'] ?: null, ['institution_crm_id' => $institution->crm_id ?? null]);
+    }
+
     /** "Send email to Inst. for missing information" when the ministry requests additional information. */
     public function changesRequested(object $institution, object $application, string $changes, string $dueDate): void
     {

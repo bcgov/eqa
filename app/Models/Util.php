@@ -32,6 +32,8 @@ class Util extends Model
         'deadline_admin_fee_days' => 'eqa.deadlines.admin_fee_days',
         'deadline_appeal_days' => 'eqa.deadlines.appeal_days',
         'deadline_changes_days' => 'eqa.deadlines.changes_days',
+        'deadline_application_days' => 'eqa.deadlines.application_days',
+        'deadline_application_reminder_days' => 'eqa.deadlines.application_reminder_days',
         'invoice_title' => 'eqa.invoice.title',
         'invoice_payment_online' => 'eqa.invoice.payment_online',
         'invoice_payment_offline' => 'eqa.invoice.payment_offline',

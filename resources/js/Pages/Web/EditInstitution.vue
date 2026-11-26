@@ -43,11 +43,11 @@ const form = useForm({
     province: props.institution?.province ?? '',
     postal_code: props.institution?.postal_code ?? '',
     country: props.institution?.country ?? '',
-    total_enrolment: props.institution?.total_enrolment ?? 0,
-    intl_students_permit: props.institution?.intl_students_permit ?? 0,
+    total_enrolment: props.institution?.total_enrolment ?? null,
+    intl_students_permit: props.institution?.intl_students_permit ?? null,
     // Enrolment Type and International Students - Other are retired: not asked, never written.
-    in_person_students: props.institution?.in_person_students ?? 0,
-    online_students: props.institution?.online_students ?? 0,
+    in_person_students: props.institution?.in_person_students ?? null,
+    online_students: props.institution?.online_students ?? null,
     // Only sent (and accepted) on the ministry's edit page.
     ...(props.canEditContacts ? {
         business_owner: props.institution?.business_owner ?? '',

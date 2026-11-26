@@ -606,6 +606,7 @@ class WebPortalController extends Controller
             'institution' => $institution,
             'previousNames' => app(ApplicationProfileService::class)->recentInstitutionNames($institution->crm_id),
             'websiteCompliance' => app(WebsiteComplianceService::class)->formChecklist(null, $institution),
+            'completionDays' => (int) config('eqa.deadlines.application_days', 30),
         ]);
     }
 
@@ -639,7 +640,7 @@ class WebPortalController extends Controller
         $crmId = (string) Str::uuid();
 
         // Saved as a Draft; the application fee is invoiced once it is submitted.
-        DB::transaction(function () use ($data, $crmId, $reference, $institution, $amount, $previousNames, $campusLocations, $compliance, $checklist, $complianceAnswers): void {
+        DB::transaction(function () use ($data, $crmId, $reference, $institution, $amount, $previousNames, $campusLocations, $compliance, $checklist, $complianceAnswers, $fees): void {
             DB::table('applications')->insert(array_merge($data, [
                 'crm_id' => $crmId,
                 'reference' => $reference,
@@ -649,6 +650,7 @@ class WebPortalController extends Controller
                 'institution_name' => $institution->name,
                 'owner_name' => $institution->business_owner ?? null,
                 'application_date' => Carbon::now()->toDateString(),
+                'completion_due_date' => $fees->completionDueDate(),
                 'application_fee' => $amount,
                 'total_due' => $amount,
             ]));
@@ -759,7 +761,7 @@ class WebPortalController extends Controller
         $invoice = $fees->openAppeal($application);
         if ($invoice->invoice_status === 'Paid') {
             return redirect('/web/applications/'.$crmId)
-                ->with('success', 'Appeal submitted. No appeal fee applies because your institution is fee exempt.');
+                ->with('success', 'Your intent to appeal has been received. The ministry will contact you with instructions to submit your appeal.');
         }
 
         return redirect('/web/applications/'.$crmId)

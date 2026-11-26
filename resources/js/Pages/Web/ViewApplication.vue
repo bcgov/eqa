@@ -23,6 +23,8 @@ const busy = ref(false)
 const feeLabels = { application_new: 'New Application Fee', application_renewal: 'Renewal Application Fee', admin_variable: 'Administrative Fee', appeal: 'Appeal Fee' }
 const reopened = computed(() => props.application.workflow_stage === 'changes_requested')
 const unpaidFee = computed(() => props.invoices.some((i) => i.payable))
+// Started but the application fee not yet paid: the application completion deadline applies.
+const completionPending = computed(() => ['draft', 'fee_required'].includes(props.application.workflow_stage))
 
 function post(url) {
     busy.value = true
@@ -130,6 +132,11 @@ const help = computed(() => usePage().props.settings?.help ?? {})
                     </tr>
                 </tbody>
             </table>
+
+            <p v-if="completionPending && application.completion_due_date" class="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                <b>Complete by {{ application.completion_due_date }}.</b>
+                {{ awaitingSubmission ? 'Submit this application and pay the application fee' : 'Pay the application fee' }} by this date, or the application expires and you will need to start a new one.
+            </p>
 
             <p v-if="unpaidFee" class="mb-4 text-sm text-slate-600">Pay online, or pay by cheque or another method and EQA staff will confirm your payment.</p>
             <p v-if="awaitingSubmission" class="mb-4 text-sm text-slate-600">Your application has not been submitted. You can edit it until you submit it; <template v-if="[true, 1, '1', 't'].includes(institution?.fee_exempt)">no application fee applies because your institution is fee exempt.</template><template v-else>the application fee is invoiced on submission.</template></p>

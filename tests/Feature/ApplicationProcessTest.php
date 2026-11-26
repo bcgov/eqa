@@ -640,6 +640,25 @@ class ApplicationProcessTest extends TestCase
         $this->assertEquals(700, $this->institution()->total_enrolment);
     }
 
+    public function test_profile_enrolment_saved_as_zero_is_filled_from_the_latest_approved_application(): void
+    {
+        DB::table('institutions')->where('crm_id', self::INSTITUTION)->update(['total_enrolment' => 0, 'intl_students_permit' => 0, 'in_person_students' => 12, 'online_students' => null]);
+        $this->applicationAt('end', ['status' => 'Approved', 'approved_date' => '2024-02-01', 'total_enrolment' => 300, 'intl_students_permit' => 9, 'in_person_students' => 280, 'online_students' => 20]);
+        $latest = $this->applicationAt('end', ['status' => 'Approved', 'approved_date' => '2025-02-01', 'reference' => 'APP-LATEST', 'total_enrolment' => 5, 'intl_students_permit' => 2, 'in_person_students' => 8, 'online_students' => 99]);
+
+        (require database_path('migrations/2026_11_26_000002_fill_zero_enrolment_from_latest_approved_application.php'))->up();
+
+        $institution = $this->institution();
+        $this->assertSame([5, 2, 12, 99], [(int) $institution->total_enrolment, (int) $institution->intl_students_permit, (int) $institution->in_person_students, (int) $institution->online_students],
+            'Empty or 0 values come from the latest approved application; a value entered on the profile is kept.');
+
+        $version = (string) app(\App\Http\Middleware\HandleInertiaRequests::class)->version(request());
+        $this->asMinistry()->withHeaders(['X-Inertia' => 'true', 'X-Inertia-Version' => $version])
+            ->get('/admin/institutions/'.self::INSTITUTION)
+            ->assertJsonPath('props.enrolmentSource.crm_id', $latest)
+            ->assertJsonPath('props.enrolmentSource.reference', 'APP-LATEST');
+    }
+
     public function test_unpaid_administrative_fee_undoes_a_designation_made_on_approval(): void
     {
         DB::table('institutions')->where('crm_id', self::INSTITUTION)->update(['eqa_status' => 'Pending']);
@@ -1130,6 +1149,80 @@ class ApplicationProcessTest extends TestCase
         $this->advance($id, 'extend_changes', ['changes_due_date' => $this->vancouverDate(10)])->assertSessionHas('error');
 
         $this->assertNull($this->application($id)->changes_due_date);
+    }
+
+    public function test_application_must_be_submitted_and_paid_within_the_completion_deadline(): void
+    {
+        $draft = $this->startApplication();
+        $this->assertSame($this->vancouverDate(30), $this->application($draft)->completion_due_date);
+        $this->viewApplication($draft)->assertJsonPath('props.application.completion_due_date', $this->vancouverDate(30));
+
+        // Submitted a week later: the application fee is due by the same completion deadline.
+        $this->travel(7)->days();
+        $this->asInstitution()->post("/web/applications/{$draft}/submit")->assertSessionHas('success');
+        $this->assertSame($this->application($draft)->completion_due_date, $this->invoice($draft, ApplicationFeeService::FEE_APPLICATION_NEW)->due_date);
+
+        // A paid application is past the deadline's reach.
+        $paid = $this->applicationAt('fees_payment', ['completion_due_date' => $this->vancouverDate(1), 'institution_crm_id' => (string) Str::uuid()]);
+
+        $this->travel(23)->days();
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
+        $this->assertSame('fee_required', $this->application($draft)->workflow_stage, 'Not expired on the due date itself.');
+
+        $this->travel(1)->days();
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
+        $application = $this->application($draft);
+        $this->assertSame('end', $application->workflow_stage);
+        $this->assertSame('Expired', $application->status);
+        $this->assertSame('Expired', $this->invoice($draft, ApplicationFeeService::FEE_APPLICATION_NEW)->invoice_status);
+        $this->assertSame('fees_payment', $this->application($paid)->workflow_stage);
+
+        // The institution can start again.
+        $this->asInstitution()->get('/web/applications/new')->assertOk();
+    }
+
+    public function test_unsubmitted_draft_expires_and_reminder_is_emailed_once_before_the_completion_deadline(): void
+    {
+        $id = $this->startApplication();
+
+        $this->travel(22)->days();
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
+        $this->assertSame(0, DB::table('sent_emails')->where('template_key', 'application_completion_reminder')->count(), 'Too early for the 7-day reminder.');
+
+        $this->travel(1)->days();
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
+        $this->assertSame(1, DB::table('sent_emails')->where('template_key', 'application_completion_reminder')->count());
+        $this->assertEmailed('application_completion_reminder', $this->application($id)->completion_due_date);
+        $this->assertNotNull($this->application($id)->completion_reminder_sent_at);
+
+        $this->travel(8)->days();
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
+        $this->assertSame('Expired', $this->application($id)->status);
+        $this->assertNull($this->invoice($id, ApplicationFeeService::FEE_APPLICATION_NEW), 'A draft was never invoiced.');
+    }
+
+    public function test_ministry_can_change_the_completion_deadline_of_a_draft_or_unpaid_application(): void
+    {
+        $id = $this->submittedApplication();
+        DB::table('applications')->where('crm_id', $id)->update(['completion_reminder_sent_at' => Carbon::now()]);
+
+        $this->advance($id, 'extend_completion', ['completion_due_date' => $this->vancouverDate(0)])->assertSessionHasErrors('completion_due_date');
+        $this->advance($id, 'extend_completion', ['completion_due_date' => $this->vancouverDate(60)])->assertSessionHas('success');
+
+        $application = $this->application($id);
+        $this->assertSame($this->vancouverDate(60), $application->completion_due_date);
+        $this->assertNull($application->completion_reminder_sent_at, 'The reminder is sent again before the new date.');
+        $this->assertSame('fee_required', $application->workflow_stage);
+        $this->assertSame($this->vancouverDate(60), $this->invoice($id, ApplicationFeeService::FEE_APPLICATION_NEW)->due_date);
+
+        $this->travel(45)->days();
+        $this->artisan('eqa:enforce-deadlines')->assertSuccessful();
+        $this->assertSame('fee_required', $this->application($id)->workflow_stage);
+
+        // Only while the application is unfinished.
+        $review = $this->applicationAt('under_review');
+        $this->advance($review, 'extend_completion', ['completion_due_date' => $this->vancouverDate(10)])->assertSessionHas('error');
     }
 
     public function test_institution_sees_and_resubmits_an_application_returned_for_additional_information(): void

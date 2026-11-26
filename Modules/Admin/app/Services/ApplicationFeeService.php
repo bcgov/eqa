@@ -28,6 +28,9 @@ class ApplicationFeeService
 
     public const APPLICATION_FEES = [self::FEE_APPLICATION_NEW, self::FEE_APPLICATION_RENEWAL];
 
+    /** Stages covered by the application completion deadline: started but the application fee not yet paid. */
+    public const COMPLETION_STAGES = ['draft', 'fee_required'];
+
     private const FEE_LABELS = [
         self::FEE_APPLICATION_NEW => 'New Application Fee',
         self::FEE_APPLICATION_RENEWAL => 'Renewal Application Fee',
@@ -478,7 +481,47 @@ class ApplicationFeeService
             'total_due' => $quote['amount'],
         ]);
 
-        return $this->createQuotedInvoice($application, $feeType, $quote);
+        // The fee is due by the application completion deadline.
+        return $this->createQuotedInvoice($application, $feeType, $quote, $this->ensureCompletionDueDate($application));
+    }
+
+    /** Application completion deadline for an application started on $startDate (default today): Maintenance > Utils. */
+    public function completionDueDate(?string $startDate = null): string
+    {
+        $start = $startDate ? Carbon::parse($startDate, 'America/Vancouver') : Carbon::now('America/Vancouver');
+
+        return $start->addDays((int) config('eqa.deadlines.application_days', 30))->toDateString();
+    }
+
+    /** Applications started before the deadline existed get a full period from today. */
+    private function ensureCompletionDueDate(object $application): string
+    {
+        if (! empty($application->completion_due_date)) {
+            return substr((string) $application->completion_due_date, 0, 10);
+        }
+
+        $due = $this->completionDueDate();
+        DB::table('applications')->where('crm_id', $application->crm_id)->update(['completion_due_date' => $due]);
+
+        return $due;
+    }
+
+    /**
+     * Ministry moves the completion deadline of a draft or unpaid application. The unpaid application
+     * fee invoice follows, and the reminder is sent again before the new date.
+     */
+    public function extendCompletionDeadline(object $application, string $dueDate): void
+    {
+        DB::table('applications')->where('crm_id', $application->crm_id)->update([
+            'completion_due_date' => $dueDate,
+            'completion_reminder_sent_at' => null,
+        ]);
+
+        DB::table('invoices')
+            ->where('application_crm_id', $application->crm_id)
+            ->whereIn('fee_type', self::APPLICATION_FEES)
+            ->whereNotIn('invoice_status', ['Paid', 'Expired'])
+            ->update(['due_date' => $dueDate]);
     }
 
     public const STATUS_INFO_REQUIRED = 'Additional Information Required';
@@ -628,13 +671,15 @@ class ApplicationFeeService
      * decline stands). An unanswered change request becomes Pending Admin Confirm Expiry instead.
      * Finally, Designated institutions whose designation lapsed without an approved renewal are
      * De-Designated (after the admin-fee expiry, so an unpaid approval no longer carries them).
+     * Drafts and unpaid applications past their completion deadline expire, and those nearing it
+     * are sent a reminder.
      *
-     * @return array{admin_fee: int, changes: int, appeal: int, lapsed: int}
+     * @return array{admin_fee: int, changes: int, appeal: int, lapsed: int, incomplete: int, reminders: int}
      */
     public function enforceDeadlines(): array
     {
         $today = $this->today();
-        $counts = ['admin_fee' => 0, 'changes' => 0, 'appeal' => 0, 'lapsed' => 0];
+        $counts = ['admin_fee' => 0, 'changes' => 0, 'appeal' => 0, 'lapsed' => 0, 'incomplete' => 0, 'reminders' => 0];
 
         foreach ([['admin_fee', self::FEE_ADMIN_VARIABLE], ['appeal_payment', self::FEE_APPEAL]] as [$stage, $feeType]) {
             $overdue = DB::table('applications as a')
@@ -669,8 +714,69 @@ class ApplicationFeeService
             ->update(['workflow_stage' => 'pending_expiry', 'status' => self::STATUS_PENDING_EXPIRY]);
 
         $counts['lapsed'] = $this->designation->deDesignateLapsed();
+        $counts['incomplete'] = $this->expireIncompleteApplications($today);
+        $counts['reminders'] = $this->sendCompletionReminders($today);
 
         return $counts;
+    }
+
+    /**
+     * Applications not submitted and paid by their completion deadline expire, along with their unpaid
+     * application fee invoice. One whose online payment is still being confirmed is left alone.
+     */
+    private function expireIncompleteApplications(string $today): int
+    {
+        $expressPay = app(ExpressPayService::class);
+        $overdue = DB::table('applications')
+            ->whereIn('workflow_stage', self::COMPLETION_STAGES)
+            ->whereNotNull('completion_due_date')
+            ->where('completion_due_date', '<', $today)
+            ->get();
+
+        $expired = 0;
+        foreach ($overdue as $application) {
+            $invoice = $this->invoiceFor((string) $application->crm_id, self::APPLICATION_FEES);
+            if ($invoice !== null && ($invoice->invoice_status === 'Paid' || $expressPay->hasPaymentUnderReview((string) $invoice->crm_id))) {
+                continue;
+            }
+            if ($invoice !== null && $invoice->invoice_status !== 'Expired') {
+                DB::table('invoices')->where('crm_id', $invoice->crm_id)->update(['invoice_status' => 'Expired']);
+            }
+            DB::table('applications')->where('crm_id', $application->crm_id)->update(['workflow_stage' => 'end', 'status' => 'Expired']);
+            $expired++;
+        }
+
+        return $expired;
+    }
+
+    /** Email a reminder once to institutions whose draft or unpaid application is nearing its completion deadline. */
+    private function sendCompletionReminders(string $today): int
+    {
+        $cutoff = Carbon::parse($today, 'America/Vancouver')->addDays((int) config('eqa.deadlines.application_reminder_days', 7))->toDateString();
+        $due = DB::table('applications')
+            ->whereIn('workflow_stage', self::COMPLETION_STAGES)
+            ->whereNull('completion_reminder_sent_at')
+            ->whereBetween('completion_due_date', [$today, $cutoff])
+            ->get();
+
+        $sent = 0;
+        foreach ($due as $application) {
+            $institution = $this->institution($application);
+            if ($institution === null) {
+                continue;
+            }
+            try {
+                $this->notifier->completionReminder($institution, $application, $this->invoiceFor((string) $application->crm_id, self::APPLICATION_FEES));
+            } catch (Throwable $e) {
+                Log::warning('Completion reminder email failed for application '.($application->reference ?? $application->crm_id).': '.$e->getMessage());
+
+                continue;
+            }
+            DB::table('applications')->where('crm_id', $application->crm_id)->update(['completion_reminder_sent_at' => Carbon::now()]);
+            $sent++;
+        }
+
+        return $sent;
     }
 
     private function completeDesignation(object $application): void

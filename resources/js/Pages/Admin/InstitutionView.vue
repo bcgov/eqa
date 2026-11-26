@@ -11,6 +11,7 @@ const props = defineProps({
     sentEmails: { type: Array, default: () => [] },
     bceidLookup: { type: Object, default: null },
     previousOperatingNames: { type: Array, default: () => [] },
+    enrolmentSource: { type: Object, default: null },
     designationOptions: { type: Object, default: () => ({ statuses: [], standings: [], ptibRequired: false, ptibQaMetThrough: '' }) },
 })
 
@@ -346,6 +347,11 @@ function removeDba(d) {
                 <div class="flex justify-between py-2"><dt class="text-slate-500">In-Person</dt><dd class="text-slate-800">{{ institution?.in_person_students ?? '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Online</dt><dd class="text-slate-800">{{ institution?.online_students ?? '—' }}</dd></div>
             </dl>
+            <p class="mt-3 text-xs text-slate-500">
+                <template v-if="enrolmentSource">Updated from the latest approved application
+                    <Link :href="`/admin/applications/${enrolmentSource.crm_id}`" class="font-mono text-indigo-600 hover:underline">{{ enrolmentSource.reference }}</Link><template v-if="enrolmentSource.approved_date"> (approved {{ enrolmentSource.approved_date }})</template>. Edit Institution Details to change it.</template>
+                <template v-else>No approved application yet. Edit Institution Details to enter it.</template>
+            </p>
         </div>
     </div>
 
