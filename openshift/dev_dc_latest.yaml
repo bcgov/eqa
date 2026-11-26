@@ -139,17 +139,19 @@ objects:
                     - >
                       date
 
-                      oc login --token=$(LOGIN_TOKEN) --server=https://api.gold.devops.gov.bc.ca:6443
-
-                      oc version
-
-                      echo ""
+                      oc login --token=$(LOGIN_TOKEN) --server=https://api.gold.devops.gov.bc.ca:6443 > /dev/null
 
                       echo "==========> Starting schedule run"
 
-                      oc -n ${NAMESPACE} get pods -l deployment=${NAME} -o name | xargs -I {} sh -c 'oc exec -it {} -- php artisan job:dispatch-midnight && oc exec -it {} -- php artisan queue:work --once --queue=midnight'
+                      POD=`oc -n ${NAMESPACE} get pods -l deployment=${NAME} --field-selector=status.phase=Running -o name | head -n 1`
+
+                      if [ -z "$POD" ]; then echo "No running ${NAME} pod found"; exit 1; fi
+
+                      oc -n ${NAMESPACE} exec "$POD" -c ${NAME} -- php artisan schedule:run; STATUS=$?
 
                       echo "==========> Finished schedule run"
+
+                      exit $STATUS
 
               restartPolicy: 'Never'
               terminationGracePeriodSeconds: 30
@@ -285,10 +287,8 @@ parameters:
     required: true
   - name: 'SCHEDULE'
     displayName: 'Cron Schedule'
-    description: 'Cron Schedule to Execute the Job (in UTC)'
-    value: '0 7 * * *' # at 8 UTC (00:00 midnight PST)
-    # value: '*/5 * * * *' #every 5 minutes
-    # value: '0 * * * *' #at the top of the hour
+    description: 'How often to run the Laravel scheduler (php artisan schedule:run) in one app pod. The task times themselves are set in routes/console.php (America/Vancouver).'
+    value: '*/5 * * * *' # every 5 minutes
     required: true
   - name: 'SUCCESS_JOBS_HISTORY_LIMIT'
     displayName: 'Successful Job History Limit'
