@@ -112,7 +112,7 @@ class ApplicationProcessTest extends TestCase
         $this->reviewUntil($id, 'under_review');
         $this->assertSame('Under Review', $this->application($id)->status);
 
-        $this->advance($id, 'eligible', ['eqa_good_standing' => true])->assertSessionHas('success');
+        $this->advance($id, 'eligible')->assertSessionHas('success');
         $this->assertSame('application_approval', $this->application($id)->workflow_stage);
 
         $this->advance($id, 'approve')->assertSessionHas('success');
@@ -365,19 +365,21 @@ class ApplicationProcessTest extends TestCase
         $this->assertSame('Designated', $this->institution()->eqa_status);
     }
 
-    public function test_ptiru_institution_not_in_good_standing_is_not_designated(): void
+    public function test_ptiru_institution_is_designated_on_approval_whatever_its_retired_ptiru_standing(): void
     {
         DB::table('institutions')->where('crm_id', self::INSTITUTION)->update([
+            'eqa_status' => 'Pending',
             'qa_met_through' => DesignationService::PTIRU_QA_MET_THROUGH,
             'ptib_standing' => 'Not In Good Standing',
         ]);
         $id = $this->applicationAt('application_approval');
 
-        $this->advance($id, 'approve');
-        $this->payOnline($this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE));
+        $this->advance($id, 'approve')->assertSessionHas('success')->assertSessionMissing('error');
+        $this->assertSame('Designated', $this->institution()->eqa_status);
 
-        $this->assertSame('end', $this->application($id)->workflow_stage);
-        $this->assertNotSame('Designated', $this->institution()->eqa_status);
+        $this->asMinistry()->put('/admin/institutions/'.self::INSTITUTION.'/designation', ['eqa_status' => 'Designated'])
+            ->assertSessionHasNoErrors();
+        $this->assertSame('Designated', $this->institution()->eqa_status);
     }
 
     public function test_unpaid_administrative_fee_expires_the_application(): void
@@ -675,19 +677,6 @@ class ApplicationProcessTest extends TestCase
         $this->assertNull($institution->designation_expiry);
     }
 
-    public function test_approval_warns_when_ptiru_standing_prevents_the_designation(): void
-    {
-        DB::table('institutions')->where('crm_id', self::INSTITUTION)->update([
-            'eqa_status' => 'Pending', 'qa_met_through' => DesignationService::PTIRU_QA_MET_THROUGH, 'ptib_standing' => 'Not in Good Standing',
-        ]);
-        $id = $this->applicationAt('application_approval');
-
-        $this->advance($id, 'approve')
-            ->assertSessionHas('success')
-            ->assertSessionHas('error', fn (string $m): bool => str_contains($m, 'could not be Designated'));
-        $this->assertSame('Pending', $this->institution()->eqa_status);
-    }
-
     public function test_notifications_go_to_the_primary_contact_email_when_one_is_recorded(): void
     {
         DB::table('institutions')->where('crm_id', self::INSTITUTION)->update(['primary_contact' => 'Robin Primary', 'primary_contact_email' => 'robin@process.example']);
@@ -709,7 +698,7 @@ class ApplicationProcessTest extends TestCase
 
         $id = $this->submittedApplication(['intl_students_permit' => 100, 'per_student_fee_enrolment' => 35]);
         $this->reviewUntil($id, 'under_review');
-        $this->advance($id, 'eligible', ['eqa_good_standing' => true]);
+        $this->advance($id, 'eligible');
         $this->advance($id, 'approve')->assertSessionHas('success');
 
         $adminFee = $this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE);
@@ -767,7 +756,7 @@ class ApplicationProcessTest extends TestCase
         $this->assertSame(0, DB::table('sent_emails')->where('template_key', 'payment_receipt')->count(), 'Nothing was paid, so no receipt.');
 
         $this->reviewUntil($id, 'under_review');
-        $this->advance($id, 'eligible', ['eqa_good_standing' => true])->assertSessionHas('success');
+        $this->advance($id, 'eligible')->assertSessionHas('success');
         $this->advance($id, 'approve')->assertSessionHas('success');
 
         $adminFee = $this->invoice($id, ApplicationFeeService::FEE_ADMIN_VARIABLE);

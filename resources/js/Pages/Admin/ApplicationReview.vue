@@ -11,7 +11,6 @@ const props = defineProps({
     invoice: { type: Object, default: null },
     invoices: { type: Array, default: () => [] },
     adminFeeQuote: { type: Object, default: () => ({ amount: 0, description: '' }) },
-    qaMetThrough: { type: String, default: null },
     defaultChangesDueDate: { type: String, default: '' },
     campusLocations: { type: Array, default: () => [] },
     previousNames: { type: Array, default: () => [] },
@@ -22,15 +21,6 @@ const page = usePage()
 const flash = computed(() => page.props.flash || {})
 // "?" help text (Maintenance > Utils), shown as hover hints on the enrolment labels.
 const help = computed(() => page.props.settings?.help ?? {})
-
-// PTIRU Standing is only relevant when QA is met through the Private Training
-// designation. Match both the legacy "(PTIB)" label and the renamed "(PTIRU)" one,
-// so the PTIRU good-standing check is hidden for every other QA pathway
-// (e.g. Public Institution Legislation, Degree Authorization Act, Ministry Review).
-const showPtiru = computed(() => {
-    const qa = props.qaMetThrough
-    return typeof qa === 'string' && (qa.includes('(PTIB)') || qa.includes('(PTIRU)'))
-})
 
 const stage = computed(() => props.application.workflow_stage || 'draft')
 
@@ -59,8 +49,6 @@ const steps = computed(() => [
 
 const notApproved = computed(() => ['Not Approved', 'Declined', 'Expired'].includes(props.application.status))
 
-const eqaGood = ref(props.application.eqa_good_standing ?? true)
-const ptibGood = ref(props.application.ptib_good_standing ?? true)
 const reasons = ref(props.application.non_approval_reasons || '')
 const changes = ref('')
 const changesDueDate = ref(props.defaultChangesDueDate)
@@ -99,8 +87,6 @@ const form = useForm({
     ready_for_review: truthy(a.ready_for_review),
     eligibility: a.eligibility ?? '',
     review_completion_date: a.review_completion_date ?? '',
-    eqa_good_standing: truthy(a.eqa_good_standing),
-    ptib_good_standing: truthy(a.ptib_good_standing),
     need_additional_details: truthy(a.need_additional_details),
     suitability_review_date: a.suitability_review_date ?? '',
     resubmission_date: a.resubmission_date ?? '',
@@ -136,20 +122,6 @@ const form = useForm({
     affirm_authorized: truthy(a.affirm_authorized),
     representative_signature: a.representative_signature ?? '',
 })
-
-// Begin Review copies the institution's standing onto the application server-side;
-// the page component is reused after the visit, so re-sync the checkboxes from the
-// fresh props instead of keeping the stale defaults (which would overwrite the copy).
-watch(
-    () => [props.application.eqa_good_standing, props.application.ptib_good_standing],
-    ([eqa, ptib]) => {
-        eqaGood.value = eqa ?? true
-        ptibGood.value = ptib ?? true
-        form.eqa_good_standing = truthy(eqa)
-        form.ptib_good_standing = truthy(ptib)
-        form.defaults({ eqa_good_standing: truthy(eqa), ptib_good_standing: truthy(ptib) })
-    },
-)
 
 const dateFields = ['review_completion_date', 'suitability_review_date', 'resubmission_date', 'approved_date', 'designation_expiry', 'not_approved_date', 'eligibility']
 
@@ -315,14 +287,10 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
         </div>
 
         <div v-else-if="stage === 'under_review'">
-            <p class="mb-3 text-sm text-slate-600">Record the standing checks, then decide the eligibility outcome.</p>
-            <div class="mb-4 flex flex-wrap gap-5">
-                <label class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" v-model="eqaGood" class="rounded"> EQA in Good Standing</label>
-                <label v-if="showPtiru" class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" v-model="ptibGood" class="rounded"> PTIRU in Good Standing</label>
-            </div>
+            <p class="mb-3 text-sm text-slate-600">Decide the eligibility outcome.</p>
             <div class="flex flex-wrap gap-2">
-                <button :disabled="busy" @click="advance('eligible', { eqa_good_standing: eqaGood, ptib_good_standing: ptibGood })" :class="[btn, 'bg-green-600 hover:bg-green-700']">Eligibility Met — Approve</button>
-                <button :disabled="busy" @click="advance('ineligible', { eqa_good_standing: eqaGood, ptib_good_standing: ptibGood })" :class="[btn, 'bg-red-600 hover:bg-red-700']">Eligibility Not Met</button>
+                <button :disabled="busy" @click="advance('eligible')" :class="[btn, 'bg-green-600 hover:bg-green-700']">Eligibility Met — Approve</button>
+                <button :disabled="busy" @click="advance('ineligible')" :class="[btn, 'bg-red-600 hover:bg-red-700']">Eligibility Not Met</button>
                 <button :disabled="busy" @click="advance('refer_suitability')" :class="[btn, 'bg-amber-500 hover:bg-amber-600']">Refer to Suitability Review</button>
             </div>
             <div class="mt-5 border-t border-indigo-100 pt-4">
@@ -438,8 +406,6 @@ const btn = 'rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm dis
                         <input type="date" v-model="form.resubmission_date" :disabled="locked" :class="inputClass" />
                     </label>
                     <div class="flex flex-col gap-2 pt-1 sm:col-span-2">
-                        <label class="flex items-center gap-2"><input type="checkbox" v-model="form.eqa_good_standing" :disabled="locked" class="rounded"> EQA in Good Standing</label>
-                        <label v-if="showPtiru" class="flex items-center gap-2"><input type="checkbox" v-model="form.ptib_good_standing" :disabled="locked" class="rounded"> PTIRU in Good Standing</label>
                         <label class="flex items-center gap-2"><input type="checkbox" v-model="form.need_additional_details" :disabled="locked" class="rounded"> Need Additional Details</label>
                     </div>
                 </div>

@@ -12,7 +12,7 @@ const props = defineProps({
     bceidLookup: { type: Object, default: null },
     previousOperatingNames: { type: Array, default: () => [] },
     enrolmentSource: { type: Object, default: null },
-    designationOptions: { type: Object, default: () => ({ statuses: [], standings: [], ptibRequired: false, ptibQaMetThrough: '' }) },
+    designationOptions: { type: Object, default: () => ({ statuses: [] }) },
 })
 
 const flash = computed(() => usePage().props.flash || {})
@@ -88,16 +88,9 @@ const emailDateTime = (v) => {
     return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString()
 }
 
-// PTIRU Standing is only relevant/required when QA is met through PTIRU Designation.
-const ptibRequired = computed(() => props.designationOptions?.ptibRequired === true)
-const ptibBlocksDesignation = computed(() =>
-    ptibRequired.value && designationForm.ptib_standing !== 'In Good Standing')
-
 const editingDesignation = ref(false)
 const designationForm = useForm({
     eqa_status: props.institution?.eqa_status ?? 'Pending',
-    eqa_standing: props.institution?.eqa_standing ?? '',
-    ptib_standing: props.institution?.ptib_standing ?? '',
     designation_start: props.institution?.designation_start ?? '',
     designation_expiry: props.institution?.designation_expiry ?? '',
 })
@@ -108,7 +101,7 @@ function saveDesignation() {
     designationForm
         .transform((data) => {
             const out = { ...data }
-            for (const k of ['eqa_standing', 'ptib_standing', 'designation_start', 'designation_expiry']) {
+            for (const k of ['designation_start', 'designation_expiry']) {
                 if (out[k] === '') out[k] = null
             }
             return out
@@ -262,8 +255,6 @@ function removeDba(d) {
             <dl v-if="!editingDesignation" class="divide-y divide-slate-100 text-sm">
                 <div class="flex justify-between py-2"><dt class="text-slate-500">QA Met Through</dt><dd class="text-right text-slate-800">{{ institution?.qa_met_through || '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">EQA Status</dt><dd class="text-slate-800">{{ institution?.eqa_status || '—' }}</dd></div>
-                <div class="flex justify-between py-2"><dt class="text-slate-500">EQA Standing</dt><dd class="text-slate-800">{{ institution?.eqa_standing || '—' }}</dd></div>
-                <div v-if="ptibRequired" class="flex justify-between py-2"><dt class="text-slate-500">PTIRU Standing</dt><dd class="text-slate-800">{{ institution?.ptib_standing || '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Designation Start</dt><dd class="text-slate-800">{{ institution?.designation_start || '—' }}</dd></div>
                 <div class="flex justify-between py-2"><dt class="text-slate-500">Designation Expiry</dt><dd class="text-slate-800">{{ institution?.designation_expiry || '—' }}</dd></div>
             </dl>
@@ -287,32 +278,14 @@ function removeDba(d) {
                     </select>
                     <span v-if="designationForm.errors.eqa_status" class="mt-1 block text-xs text-red-600">{{ designationForm.errors.eqa_status }}</span>
                 </label>
-                <label class="block"><span class="text-slate-500">EQA Standing</span>
-                    <select v-model="designationForm.eqa_standing" :class="selectClass">
-                        <option value="">—</option>
-                        <option v-for="s in designationOptions.standings" :key="s" :value="s">{{ s }}</option>
-                    </select>
-                </label>
-                <label class="block"><span class="text-slate-500">PTIRU Standing<span v-if="ptibRequired" class="text-red-500"> *</span></span>
-                    <select v-model="designationForm.ptib_standing" :class="selectClass">
-                        <option value="">—</option>
-                        <option v-for="s in designationOptions.standings" :key="s" :value="s">{{ s }}</option>
-                    </select>
-                    <span v-if="designationForm.errors.ptib_standing" class="mt-1 block text-xs text-red-600">{{ designationForm.errors.ptib_standing }}</span>
-                    <span v-else-if="!ptibRequired" class="mt-1 block text-xs text-slate-400">Not applicable — QA is not met through PTIRU Designation.</span>
-                </label>
                 <label class="block"><span class="text-slate-500">Designation Start</span>
                     <input type="date" v-model="designationForm.designation_start" :class="selectClass" />
                 </label>
                 <label class="block"><span class="text-slate-500">Designation Expiry</span>
                     <input type="date" v-model="designationForm.designation_expiry" :class="selectClass" />
                 </label>
-                <p v-if="ptibRequired && designationForm.eqa_status === 'Designated' && ptibBlocksDesignation"
-                    class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                    QA is met through PTIRU Designation, so this institution cannot be <span class="font-medium">Designated</span> unless PTIRU Standing is <span class="font-medium">In Good Standing</span>.
-                </p>
                 <p class="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                    Setting EQA Status to <span class="font-medium">Designated</span> stamps the start/expiry dates if empty. Changing a standing updates the locked “in good standing” value on this institution's open applications.<span v-if="ptibRequired"> Because QA is met through PTIRU Designation, PTIRU Standing is required and must be In Good Standing to designate.</span>
+                    Setting EQA Status to <span class="font-medium">Designated</span> stamps the start/expiry dates if empty.
                 </p>
                 <div class="flex items-center gap-2 pt-1">
                     <button type="submit" :disabled="designationForm.processing"

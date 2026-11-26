@@ -14,7 +14,6 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -51,9 +50,6 @@ class InstitutionController extends Controller
             'institution' => $institution,
             'designationOptions' => [
                 'statuses' => DesignationService::EQA_STATUSES,
-                'standings' => DesignationService::STANDINGS,
-                'ptibRequired' => DesignationService::ptiruRequired($institution->qa_met_through),
-                'ptibQaMetThrough' => DesignationService::PTIRU_QA_MET_THROUGH,
             ],
             'applications' => Schema::hasTable('applications')
                 ? DB::table('applications')->where('institution_crm_id', $crmId)->orderByDesc('application_date')->get()
@@ -182,10 +178,6 @@ class InstitutionController extends Controller
         // master switch (default OFF), so this is a no-op until enabled.
         app(ProcessNotifier::class)->institutionChanged($institution, $data, $this->adminActor());
 
-        // Changing QA Met Through can invalidate an existing Designated status
-        // (PTIRU Standing only gates designation under the PTIRU pathway).
-        app(DesignationService::class)->reconcileAfterQaChange($crmId);
-
         return redirect("/admin/institutions/{$crmId}")->with('success', 'Institution details updated.');
     }
 
@@ -198,40 +190,19 @@ class InstitutionController extends Controller
     }
 
     /**
-     * Ministry sets the institution's Designated status (EQA Status), EQA / PTIRU
-     * Standing and designation dates. Applies the coupled business rules and
-     * cascades the standing onto the institution's open applications.
+     * Ministry sets the institution's Designated status (EQA Status) and designation dates.
+     * (EQA / PTIRU Standing are retired: not shown, never written.)
      */
     public function updateDesignation(Request $request, string $crmId): RedirectResponse
     {
         $institution = $this->institution($crmId);
         abort_if($institution === null, 404);
 
-        // PTIRU Standing is required and gates designation only when this
-        // institution's QA is met through PTIRU Designation.
-        $ptibRequired = DesignationService::ptiruRequired($institution->qa_met_through);
-
-        $validator = Validator::make($request->all(), [
+        $data = $request->validate([
             'eqa_status' => ['required', Rule::in(DesignationService::EQA_STATUSES)],
-            'eqa_standing' => ['nullable', Rule::in(DesignationService::STANDINGS)],
-            'ptib_standing' => [$ptibRequired ? 'required' : 'nullable', Rule::in(DesignationService::STANDINGS)],
             'designation_start' => ['nullable', 'date'],
             'designation_expiry' => ['nullable', 'date'],
-        ], [
-            'ptib_standing.required' => 'PTIRU Standing is required when QA is met through PTIRU Designation.',
         ]);
-
-        $validator->after(function ($validator) use ($request, $institution): void {
-            if ($request->input('eqa_status') === 'Designated'
-                && ! DesignationService::ptiruPermitsDesignation($institution->qa_met_through, $request->input('ptib_standing'))) {
-                $validator->errors()->add(
-                    'eqa_status',
-                    'EQA Status cannot be Designated because QA is met through PTIRU Designation and PTIRU Standing is not In Good Standing.'
-                );
-            }
-        });
-
-        $data = $validator->validate();
 
         app(DesignationService::class)->applyInstitutionDesignation($crmId, $data);
 

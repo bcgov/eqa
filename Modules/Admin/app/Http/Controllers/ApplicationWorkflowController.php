@@ -78,8 +78,7 @@ class ApplicationWorkflowController extends Controller
             // sabc_designation is retired and read-only; older applications keep their stored value.
             'eligibility' => ['nullable', 'string', 'max:100'],
             'review_completion_date' => ['nullable', 'date'],
-            'eqa_good_standing' => ['boolean'],
-            'ptib_good_standing' => ['boolean'],
+            // eqa_good_standing / ptib_good_standing are retired: not shown, never written.
             'need_additional_details' => ['boolean'],
             'suitability_review_date' => ['nullable', 'date'],
             'resubmission_date' => ['nullable', 'date'],
@@ -190,15 +189,10 @@ class ApplicationWorkflowController extends Controller
 
                 $institution = DB::table('institutions')->where('crm_id', $application->institution_crm_id)->first();
                 $designated = ($institution->eqa_status ?? null) === 'Designated';
-                $response = back()->with('success', $invoice->invoice_status === 'Paid'
+
+                return back()->with('success', $invoice->invoice_status === 'Paid'
                     ? 'Application approved. No administrative fee applies'.($designated ? ', so the designation has been granted.' : '.')
                     : 'Application approved'.($designated ? ' and the institution is Designated' : '').'. Administrative fee invoice '.$invoice->invoice_number.' ($'.number_format((float) $invoice->total_charges, 2).') sent to the institution.');
-
-                if ($institution !== null && ! DesignationService::ptiruPermitsDesignation($institution->qa_met_through, $institution->ptib_standing)) {
-                    $response->with('error', 'The institution could not be Designated: its quality assurance is met through PTIRU Designation and its PTIRU Standing is not In Good Standing. Update the PTIRU Standing on the institution page, then set the EQA Status to Designated.');
-                }
-
-                return $response;
             case 'confirm_admin_fee':
             case 'confirm_appeal_fee':
                 $invoice = $fees->invoiceFor($crmId, $action === 'confirm_admin_fee' ? ApplicationFeeService::FEE_ADMIN_VARIABLE : ApplicationFeeService::FEE_APPEAL);
@@ -242,19 +236,12 @@ class ApplicationWorkflowController extends Controller
                 break;
             case 'begin_review':
                 $updates['status'] = 'Under Review';
-                // The application's "EQA / PTIRU in Good Standing" are a locked copy
-                // of the institution's current standing (mirrors the Dynamics form).
-                $standing = app(DesignationService::class)->standingFromInstitution($application->institution_crm_id);
-                $updates['eqa_good_standing'] = $standing['eqa_good_standing'];
-                $updates['ptib_good_standing'] = $standing['ptib_good_standing'];
                 break;
             case 'eligible':
             case 'ineligible':
                 $updates['status'] = 'Under Review';
                 $updates['eligibility'] = $action === 'eligible' ? 'Requirements Met' : 'Requirements Not Met';
                 $updates['review_completion_date'] = $today;
-                $updates['eqa_good_standing'] = $request->boolean('eqa_good_standing');
-                $updates['ptib_good_standing'] = $request->boolean('ptib_good_standing');
                 break;
             case 'refer_suitability':
                 $updates['status'] = 'Suitability Review';

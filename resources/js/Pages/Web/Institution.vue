@@ -9,13 +9,6 @@ const props = defineProps({
 })
 
 const flash = computed(() => usePage().props.flash || {})
-
-// PTIRU Standing is only relevant when QA is met through the Private Training
-// designation. Match both the legacy "(PTIB)" label and the renamed "(PTIRU)" one.
-const showPtiruStanding = computed(() => {
-    const qa = props.institution?.qa_met_through
-    return typeof qa === 'string' && (qa.includes('(PTIB)') || qa.includes('(PTIRU)'))
-})
 </script>
 
 <template>
@@ -43,8 +36,6 @@ const showPtiruStanding = computed(() => {
                 <h2 class="mb-3 text-sm font-semibold text-slate-700">Designation Information</h2>
                 <dl class="divide-y divide-slate-100 text-sm">
                     <div class="flex justify-between py-2"><dt class="text-slate-500">EQA Status</dt><dd class="text-slate-800">{{ institution.eqa_status || '—' }}</dd></div>
-                    <div class="flex justify-between py-2"><dt class="text-slate-500">EQA Standing</dt><dd class="text-slate-800">{{ institution.eqa_standing || '—' }}</dd></div>
-                    <div v-if="showPtiruStanding" class="flex justify-between py-2"><dt class="text-slate-500">PTIRU Standing</dt><dd class="text-slate-800">{{ institution.ptib_standing || '—' }}</dd></div>
                     <div class="flex justify-between py-2"><dt class="text-slate-500">Designation Start Date</dt><dd class="text-slate-800">{{ institution.designation_start || '—' }}</dd></div>
                     <div class="flex justify-between py-2"><dt class="text-slate-500">Designation Expiry Date</dt><dd class="text-slate-800">{{ institution.designation_expiry || '—' }}</dd></div>
                 </dl>

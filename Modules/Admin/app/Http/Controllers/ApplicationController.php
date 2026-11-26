@@ -69,22 +69,15 @@ class ApplicationController extends Controller
 
     public function review(string $crmId): Response
     {
-        $application = Application::with(['invoice', 'institution:crm_id,qa_met_through'])
-            ->findOrFail($crmId);
-
-        // PTIRU Standing is only relevant when the institution's quality assurance
-        // is met through the Private Training designation, so surface QA Met Through
-        // to let the review screen hide the PTIRU standing check otherwise.
-        $qaMetThrough = $application->institution?->qa_met_through;
+        $application = Application::with('invoice')->findOrFail($crmId);
 
         return Inertia::render('Admin/ApplicationReview', [
-            'application' => $application->makeHidden(['invoice', 'institution']),
+            'application' => $application->makeHidden(['invoice']),
             'invoice' => $application->invoice,
             'invoices' => DB::table('invoices')->where('application_crm_id', $crmId)->orderBy('invoice_number')->get()
                 ->each(fn (object $invoice) => $invoice->payment_under_review = app(ExpressPayService::class)->hasPaymentUnderReview((string) $invoice->crm_id)),
             'adminFeeQuote' => app(ApplicationFeeService::class)->adminFeeQuote(DB::table('applications')->where('crm_id', $crmId)->first()),
             'defaultChangesDueDate' => app(ApplicationFeeService::class)->defaultChangesDueDate(),
-            'qaMetThrough' => $qaMetThrough,
             'campusLocations' => app(ApplicationProfileService::class)->campusLocations($crmId),
             'previousNames' => app(ApplicationProfileService::class)->previousNames($crmId),
             'websiteCompliance' => app(WebsiteComplianceService::class)->copy($crmId),

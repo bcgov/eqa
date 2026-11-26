@@ -12,8 +12,6 @@ const columns = [
     { key: 'qa_met_through', label: 'QA Met Through' },
     { key: 'primary_contact', label: 'Primary Contact' },
     { key: 'eqa_status', label: 'EQA Status' },
-    { key: 'eqa_standing', label: 'EQA Standing' },
-    { key: 'ptib_standing', label: 'PTIRU Standing' },
     { key: 'designation_start', label: 'Designation Start' },
     { key: 'city', label: 'City' },
     { key: 'province', label: 'Province' },
@@ -56,13 +54,6 @@ const filtered = computed(() => {
     rows = [...rows].sort((a, b) => compare(a, b, sortKey.value) * (sortDir.value === 'asc' ? 1 : -1))
     return rows
 })
-
-function standingClass(s) {
-    if (s === 'In Good Standing') return 'bg-green-100 text-green-700'
-    if (s === 'Under Review') return 'bg-amber-100 text-amber-700'
-    if (s) return 'bg-red-100 text-red-700'
-    return 'bg-slate-100 text-slate-400'
-}
 </script>
 
 <template>
@@ -114,12 +105,6 @@ function standingClass(s) {
                     <td class="px-3 py-2 text-slate-600">{{ i.qa_met_through || '—' }}</td>
                     <td class="whitespace-nowrap px-3 py-2 text-slate-600">{{ i.primary_contact || '—' }}</td>
                     <td class="whitespace-nowrap px-3 py-2 text-slate-600">{{ i.eqa_status || '—' }}</td>
-                    <td class="px-3 py-2">
-                        <span class="rounded px-2 py-0.5 text-xs font-medium" :class="standingClass(i.eqa_standing)">{{ i.eqa_standing || '—' }}</span>
-                    </td>
-                    <td class="px-3 py-2">
-                        <span class="rounded px-2 py-0.5 text-xs font-medium" :class="standingClass(i.ptib_standing)">{{ i.ptib_standing || '—' }}</span>
-                    </td>
                     <td class="whitespace-nowrap px-3 py-2 text-slate-600">{{ i.designation_start || '—' }}</td>
                     <td class="whitespace-nowrap px-3 py-2 text-slate-600">{{ i.city || '—' }}</td>
                     <td class="px-3 py-2 text-slate-600">{{ i.province || '—' }}</td>
